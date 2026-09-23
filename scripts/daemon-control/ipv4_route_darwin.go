@@ -342,6 +342,9 @@ func (configured *IPv4Route) verify() error {
 	if err != nil {
 		return err
 	}
+	if message.Err != nil {
+		return message.Err
+	}
 	link, ok := message.Addrs[syscall.RTAX_IFP].(*route.LinkAddr)
 	if !ok || link.Index != configured.iface.Index || message.Flags&syscall.RTF_HOST == 0 {
 		return errors.New("synthetic route ownership changed")
@@ -411,8 +414,11 @@ func (configured *IPv4Route) request(kind int) (*route.RouteMessage, error) {
 		return nil, fmt.Errorf("invalid route reply: %w", err)
 	}
 	result, ok := messages[0].(*route.RouteMessage)
-	if !ok || result.ID != uintptr(os.Getpid()) || result.Seq != sequence || result.Type != kind || !configured.matches(result) {
-		return nil, errors.New("unexpected route reply")
+	if !ok {
+		return nil, errors.New("unexpected route reply type")
+	}
+	if result.ID != uintptr(os.Getpid()) || result.Seq != sequence || result.Type != kind {
+		return nil, fmt.Errorf("unexpected route reply: got type=%d id=%d seq=%d", result.Type, result.ID, result.Seq)
 	}
 	return result, nil
 }
