@@ -57,6 +57,19 @@ func TestSyntheticIPv4CleanupStateTransitions(t *testing.T) {
 	}
 }
 
+func TestSyntheticIPv4RouteWriteOutcome(t *testing.T) {
+	configured := &IPv4Route{}
+	configured.recordRouteWrite(syscall.RTM_ADD, errRouteOutcomeUnknown)
+	if !configured.routeSet {
+		t.Fatal("lost route recovery state after an unknown add outcome")
+	}
+	configured = &IPv4Route{}
+	configured.recordRouteWrite(syscall.RTM_ADD, syscall.EEXIST)
+	if configured.routeSet {
+		t.Fatal("retained route recovery state after a kernel-rejected add")
+	}
+}
+
 func TestSyntheticIPv4RouteLookupOwnership(t *testing.T) {
 	configured := &IPv4Route{
 		name:   "utun7",

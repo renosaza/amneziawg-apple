@@ -49,20 +49,39 @@ func TestManualSyntheticThreeTunnelLifecycle(t *testing.T) {
 		t.Fatal("missing owned tunnel process")
 	}
 	configured, err := configureSyntheticIPv4Route(process, "192.0.2.2", "192.0.2.1", "192.0.2.10")
+	if configured != nil {
+		t.Cleanup(func() {
+			if err := configured.Close(); err != nil {
+				t.Errorf("route cleanup failed: %v", err)
+				return
+			}
+			t.Logf("removed synthetic route target=%s interface=%s index=%d", configured.target, configured.name, configured.iface.Index)
+		})
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		if err := configured.Close(); err != nil {
-			t.Errorf("route cleanup failed: %v", err)
-			return
-		}
-		t.Logf("removed synthetic route target=%s interface=%s index=%d", configured.target, configured.name, configured.iface.Index)
-	})
 	if err := configured.verify(); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("owned synthetic route target=%s interface=%s index=%d", configured.target, configured.name, configured.iface.Index)
+	endpointRoute, err := configureSyntheticPhysicalEndpointRoute("203.0.113.10")
+	if endpointRoute != nil {
+		t.Cleanup(func() {
+			if err := endpointRoute.Close(); err != nil {
+				t.Errorf("endpoint route cleanup failed: %v", err)
+				return
+			}
+			t.Logf("removed synthetic endpoint route target=%s gateway=%s interface=%s index=%d", endpointRoute.target, endpointRoute.gateway, endpointRoute.iface.Name, endpointRoute.iface.Index)
+		})
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := endpointRoute.verify(); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("owned synthetic endpoint route target=%s gateway=%s interface=%s index=%d", endpointRoute.target, endpointRoute.gateway, endpointRoute.iface.Name, endpointRoute.iface.Index)
 	if stopped := server.apply(request{Operation: "stop", ProfileID: profileIDTwo}); !stopped.OK {
 		t.Fatalf("stop middle tunnel failed: %#v", stopped)
 	}
