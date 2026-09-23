@@ -542,9 +542,29 @@ class TunnelsManager {
             return
         }
 
-        if let alreadyWaitingTunnel = tunnels.first(where: { $0.status == .waiting }) {
-            alreadyWaitingTunnel.status = .inactive
-        }
+        #if os(macOS)
+            if let configuration = tunnel.tunnelConfiguration,
+                let validationError = RouteOwnershipValidator.validationError(
+                    activating: tunnel.name, configuration: configuration,
+                    against: tunnelsInOperation().compactMap { activeTunnel in
+                        activeTunnel.tunnelConfiguration.map { (name: activeTunnel.name, configuration: $0) }
+                    })
+            {
+                switch validationError {
+                case .routeConflict(let conflict):
+                    activationDelegate?.tunnelActivationAttemptFailed(
+                        tunnel: tunnel,
+                        error: .routeConflict(
+                            tunnelName: tunnel.name, route: conflict.route.stringRepresentation,
+                            ownerName: conflict.ownerName))
+                case .missingEndpointExclusion(let tunnelName, let endpoint):
+                    activationDelegate?.tunnelActivationAttemptFailed(
+                        tunnel: tunnel,
+                        error: .missingEndpointExclusion(tunnelName: tunnelName, endpoint: endpoint))
+                }
+                return
+            }
+        #endif
 
         #if os(iOS)
             if let alreadyWaitingTunnel = tunnels.first(where: { $0.status == .waiting }) {
