@@ -34,22 +34,27 @@ var syntheticIPv4RouteSpecs = [...]syntheticIPv4RouteSpec{
 
 var syntheticEndpointRouteTargets = [...]string{"203.0.113.10", "203.0.113.11", "203.0.113.12"}
 
+const syntheticPrecedenceEndpointTarget = "198.51.100.10"
+
 type tunnelBackend struct {
 	binary                  string
 	syntheticIPv4Routes     bool
 	syntheticEndpointRoutes bool
+	syntheticFallbackRoute  bool
 	routesMu                sync.Mutex
 	routeSlots              [len(syntheticIPv4RouteSpecs)]bool
 }
 type tunnelProcess struct {
-	command       *exec.Cmd
-	done          <-chan struct{}
-	dir           string
-	name          string
-	baseline      map[string]bool
-	route         *IPv4Route
-	endpointRoute *PhysicalEndpointRoute
-	routeSlot     int
+	command                 *exec.Cmd
+	done                    <-chan struct{}
+	dir                     string
+	name                    string
+	baseline                map[string]bool
+	route                   *IPv4Route
+	endpointRoute           *PhysicalEndpointRoute
+	fallbackRoute           *SyntheticFallbackRoute
+	precedenceEndpointRoute *PhysicalEndpointRoute
+	routeSlot               int
 }
 
 func newTunnelBackend(binary string) (Backend, error) {
@@ -121,6 +126,9 @@ func (backend *tunnelBackend) Start(config string) (Session, error) {
 	if err == nil && backend.syntheticEndpointRoutes {
 		err = backend.configureSyntheticEndpointRoute(process)
 	}
+	if err == nil && backend.syntheticFallbackRoute {
+		err = backend.configureSyntheticFallbackRoute(process)
+	}
 	if err != nil {
 		if cleanupErr := backend.Stop(Session{value: process}); cleanupErr != nil {
 			return Session{value: process}, errors.Join(err, cleanupErr)
@@ -150,6 +158,15 @@ func (backend *tunnelBackend) Stop(session Session) error {
 	}
 	select {
 	case <-process.done:
+		if err := process.closePrecedenceEndpointRoute(); err != nil {
+			return err
+		}
+		if process.fallbackRoute != nil {
+			if err := process.fallbackRoute.proveAbsentAfterTunnelExit(); err != nil {
+				return err
+			}
+			process.fallbackRoute = nil
+		}
 		if err := process.closeEndpointRoute(); err != nil {
 			return err
 		}
@@ -160,6 +177,15 @@ func (backend *tunnelBackend) Stop(session Session) error {
 			process.route = nil
 		}
 	default:
+		if err := process.closePrecedenceEndpointRoute(); err != nil {
+			return err
+		}
+		if process.fallbackRoute != nil {
+			if err := process.fallbackRoute.Close(); err != nil {
+				return err
+			}
+			process.fallbackRoute = nil
+		}
 		if err := process.closeEndpointRoute(); err != nil {
 			return err
 		}
@@ -191,6 +217,17 @@ func (backend *tunnelBackend) Stop(session Session) error {
 		return err
 	}
 	backend.releaseRouteSlot(process)
+	return nil
+}
+
+func (process *tunnelProcess) closePrecedenceEndpointRoute() error {
+	if process.precedenceEndpointRoute == nil {
+		return nil
+	}
+	if err := process.precedenceEndpointRoute.Close(); err != nil {
+		return err
+	}
+	process.precedenceEndpointRoute = nil
 	return nil
 }
 
@@ -228,6 +265,20 @@ func (backend *tunnelBackend) configureSyntheticEndpointRoute(process *tunnelPro
 	}
 	route, err := configureSyntheticPhysicalEndpointRoute(syntheticEndpointRouteTargets[process.routeSlot])
 	process.endpointRoute = route
+	return err
+}
+
+func (backend *tunnelBackend) configureSyntheticFallbackRoute(process *tunnelProcess) error {
+	if process.routeSlot != 0 {
+		return nil
+	}
+	endpointRoute, err := configureSyntheticPrecedenceEndpointRoute(syntheticPrecedenceEndpointTarget)
+	process.precedenceEndpointRoute = endpointRoute
+	if err != nil {
+		return err
+	}
+	route, err := configureSyntheticFallbackRoute(process)
+	process.fallbackRoute = route
 	return err
 }
 

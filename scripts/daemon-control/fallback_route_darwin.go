@@ -86,6 +86,40 @@ func (configured *SyntheticFallbackRoute) verify() error {
 	return nil
 }
 
+// proveAbsentAfterTunnelExit releases ownership only when the exited utun no
+// longer owns or shadows the synthetic fallback route.
+func (configured *SyntheticFallbackRoute) proveAbsentAfterTunnelExit() error {
+	interfaces, err := currentUtuns()
+	if err != nil {
+		return err
+	}
+	if interfaces[configured.name] {
+		return errors.New("owned utun remains after backend exit")
+	}
+	ownedInRIB, err := configured.ownsRouteInRIB()
+	if err != nil {
+		return err
+	}
+	if ownedInRIB {
+		return errors.New("synthetic fallback route remains after backend exit")
+	}
+	message, err := configured.lookup()
+	if err != nil {
+		return err
+	}
+	if message == nil {
+		return errors.New("synthetic fallback route lookup returned no message")
+	}
+	if message.Err != nil {
+		return message.Err
+	}
+	if configured.isFallbackRoute(message) {
+		return errors.New("synthetic fallback route remains effective after backend exit")
+	}
+	configured.routeSet = false
+	return nil
+}
+
 func (configured *SyntheticFallbackRoute) write(kind int) error {
 	message, err := requestRouteMessage(kind, syscall.RTF_UP|syscall.RTF_STATIC, configured.routeAddrs())
 	if err != nil {

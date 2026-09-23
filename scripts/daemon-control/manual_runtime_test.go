@@ -17,6 +17,7 @@ func newTunnelBackendForManualRuntime(binary string) (Backend, error) {
 	configured := backend.(*tunnelBackend)
 	configured.syntheticIPv4Routes = true
 	configured.syntheticEndpointRoutes = true
+	configured.syntheticFallbackRoute = true
 	return backend, nil
 }
 
@@ -76,13 +77,31 @@ func TestManualSyntheticThreeTunnelLifecycle(t *testing.T) {
 			t.Fatal("synthetic endpoint routes share a target")
 		}
 		endpointTargets[process.endpointRoute.target.String()] = true
+		if profile.id == profileID {
+			if process.fallbackRoute == nil || process.precedenceEndpointRoute == nil {
+				t.Fatal("missing fallback route owner")
+			}
+			if err := process.fallbackRoute.verify(); err != nil {
+				t.Fatal(err)
+			}
+			if err := process.precedenceEndpointRoute.verify(); err != nil {
+				t.Fatal(err)
+			}
+			if !process.fallbackRoute.prefix.Contains(process.precedenceEndpointRoute.target) {
+				t.Fatal("physical endpoint does not shadow the synthetic fallback")
+			}
+		} else if process.fallbackRoute != nil || process.precedenceEndpointRoute != nil {
+			t.Fatal("more than one session owns the synthetic fallback")
+		}
 		t.Logf("owned synthetic route target=%s interface=%s index=%d endpoint=%s physical=%s", process.route.target, process.route.name, process.route.iface.Index, process.endpointRoute.target, process.endpointRoute.iface.Name)
 	}
-	middle := server.profiles[profileIDTwo].value.(*tunnelProcess)
+	middle := server.profiles[profileID].value.(*tunnelProcess)
 	middleRoute := middle.route
 	middleEndpointRoute := middle.endpointRoute
-	if stopped := server.apply(request{Operation: "stop", ProfileID: profileIDTwo}); !stopped.OK {
-		t.Fatalf("stop middle tunnel failed: %#v", stopped)
+	middleFallbackRoute := middle.fallbackRoute
+	middlePrecedenceEndpointRoute := middle.precedenceEndpointRoute
+	if stopped := server.apply(request{Operation: "stop", ProfileID: profileID}); !stopped.OK {
+		t.Fatalf("stop fallback-owning tunnel failed: %#v", stopped)
 	}
 	if err := middleRoute.proveAbsentAfterTunnelExit(); err != nil {
 		t.Fatal(err)
@@ -90,7 +109,13 @@ func TestManualSyntheticThreeTunnelLifecycle(t *testing.T) {
 	if err := middleEndpointRoute.proveAbsent(); err != nil {
 		t.Fatal(err)
 	}
-	for _, profile := range []struct{ id string }{{profileID}, {profileIDThree}} {
+	if err := middleFallbackRoute.proveAbsentAfterTunnelExit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := middlePrecedenceEndpointRoute.proveAbsent(); err != nil {
+		t.Fatal(err)
+	}
+	for _, profile := range []struct{ id string }{{profileIDTwo}, {profileIDThree}} {
 		if status := server.apply(request{Operation: "status", ProfileID: profile.id}); !status.OK {
 			t.Fatalf("remaining status %s failed: %#v", profile.id, status)
 		}
@@ -101,19 +126,28 @@ func TestManualSyntheticThreeTunnelLifecycle(t *testing.T) {
 		if err := process.endpointRoute.verify(); err != nil {
 			t.Fatal(err)
 		}
+		if process.fallbackRoute != nil || process.precedenceEndpointRoute != nil {
+			t.Fatal("fallback cleanup changed a surviving session")
+		}
 	}
 	const replacementID = "44444444-2222-4333-8444-555555555555"
 	if started := server.apply(request{Operation: "start", ProfileID: replacementID, Config: "private_key=0404040404040404040404040404040404040404040404040404040404040404"}); !started.OK {
 		t.Fatalf("replacement start failed: %#v", started)
 	}
 	replacement := server.profiles[replacementID].value.(*tunnelProcess)
-	if replacement.route == nil || replacement.endpointRoute == nil || replacement.route.target != middleRoute.target || replacement.endpointRoute.target != middleEndpointRoute.target {
+	if replacement.route == nil || replacement.endpointRoute == nil || replacement.fallbackRoute == nil || replacement.precedenceEndpointRoute == nil || replacement.route.target != middleRoute.target || replacement.endpointRoute.target != middleEndpointRoute.target || replacement.precedenceEndpointRoute.target != middlePrecedenceEndpointRoute.target {
 		t.Fatal("stopped session route slot was not reused")
 	}
 	if err := replacement.route.verify(); err != nil {
 		t.Fatal(err)
 	}
 	if err := replacement.endpointRoute.verify(); err != nil {
+		t.Fatal(err)
+	}
+	if err := replacement.fallbackRoute.verify(); err != nil {
+		t.Fatal(err)
+	}
+	if err := replacement.precedenceEndpointRoute.verify(); err != nil {
 		t.Fatal(err)
 	}
 }
