@@ -17,3 +17,15 @@ func TestSyntheticIPv4Validation(t *testing.T) {
 		t.Fatal("accepted non-IPv4 address")
 	}
 }
+
+func TestSyntheticIPv4AddressStateValidation(t *testing.T) {
+	if err := requireAddressState("preflight", addressStateAbsent, addressStateAbsent); err != nil {
+		t.Fatal(err)
+	}
+	if err := requireAddressState("cleanup", addressStateAbsent, addressStateOwned); err == nil {
+		t.Fatal("accepted an absent address as owned")
+	}
+	if err := requireAddressState("cleanup", addressStateErrorCode, addressStateOwned); err == nil {
+		t.Fatal("accepted an unreadable address state")
+	}
+}

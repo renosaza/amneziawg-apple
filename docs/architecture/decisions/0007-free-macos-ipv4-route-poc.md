@@ -15,3 +15,9 @@ point-to-point address pair and one exact TEST-NET `/32` route to an owned
 synthetic daemon `utun`. Verify the route's interface index before returning
 and remove only that route/address during cleanup. The manual workflow remains
 dispatch-only; it does not configure physical routes, IPv6, DNS, or traffic.
+
+Before assignment, reject an IPv4 local address already present on any
+interface. Before `SIOCDIFADDR`, require the current address and peer to still
+belong to the recorded `utun`; an unavailable or conflicting ioctl view leaves
+the address and interface flags untouched. If this POC raised `IFF_UP`, restore
+only that flag after its owned address is gone.
