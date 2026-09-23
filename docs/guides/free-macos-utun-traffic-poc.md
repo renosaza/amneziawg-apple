@@ -39,4 +39,7 @@ code has been merged to the default branch. It builds the pinned backend, runs
 the no-network self-check, then runs the proof with `sudo` on a fresh GitHub
 macOS runner. Existing unrelated `utun` interfaces are preserved; a route
 collision on a test destination causes a failure before any change. No CI run
-has been recorded from this branch yet.
+was recorded for `15f601647d3a0405a68e2ff0bf98da9c34abd65f` on 2026-09-23:
+[run 35841081452](https://github.com/renosaza/amneziawg-apple/actions/runs/35841081452)
+completed successfully. It reported independent `utun4` through `utun9` for
+the three synthetic pairs after checking handshake, RX and TX counters.
