@@ -6,6 +6,7 @@ package daemoncontrol
 
 import (
 	"errors"
+	"net"
 	"net/netip"
 	"syscall"
 	"testing"
@@ -73,5 +74,21 @@ func TestSyntheticIPv4PreflightAcceptsDefaultRouteButRejectsTargetHostRoute(t *t
 	}}
 	if !configured.isTargetHostRoute(targetHostRoute) {
 		t.Fatal("did not identify the target host route")
+	}
+}
+
+func TestSyntheticIPv4OwnedRouteRequestIncludesIFP(t *testing.T) {
+	configured := &IPv4Route{
+		name:   "utun7",
+		target: netip.MustParseAddr("192.0.2.10"),
+		iface:  &net.Interface{Index: 7, Name: "utun7"},
+	}
+	addrs := configured.ownedRouteRequestAddrs()
+	link, ok := addrs[syscall.RTAX_IFP].(*route.LinkAddr)
+	if !ok || link.Index != configured.iface.Index || link.Name != configured.name {
+		t.Fatal("owned route request does not ask for the recorded utun interface")
+	}
+	if addrs[syscall.RTAX_GATEWAY] != nil {
+		t.Fatal("owned route request placed the interface in the gateway slot")
 	}
 }

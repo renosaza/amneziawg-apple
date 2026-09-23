@@ -338,16 +338,15 @@ func (configured *IPv4Route) restoreInterfaceFlags() error {
 }
 
 func (configured *IPv4Route) verify() error {
-	message, err := configured.request(syscall.RTM_GET)
+	message, err := configured.requestOwnedRoute()
 	if err != nil {
 		return err
 	}
 	if message.Err != nil {
 		return message.Err
 	}
-	link, ok := message.Addrs[syscall.RTAX_IFP].(*route.LinkAddr)
-	if !ok || link.Index != configured.iface.Index || message.Flags&syscall.RTF_HOST == 0 {
-		return errors.New("synthetic route ownership changed")
+	if !configured.matches(message) {
+		return fmt.Errorf("synthetic route ownership changed: flags=%#x ifp_index=%d", message.Flags, routeInterfaceIndex(message))
 	}
 	return nil
 }
@@ -386,17 +385,33 @@ func (configured *IPv4Route) recordFlagRestore(err error) {
 }
 
 func (configured *IPv4Route) request(kind int) (*route.RouteMessage, error) {
+	return configured.requestWithAddrs(kind, []route.Addr{
+		&route.Inet4Addr{IP: configured.target.As4()},
+		&route.LinkAddr{Index: configured.iface.Index, Name: configured.name},
+		&route.Inet4Addr{IP: [4]byte{255, 255, 255, 255}},
+	})
+}
+
+func (configured *IPv4Route) requestOwnedRoute() (*route.RouteMessage, error) {
+	return configured.requestWithAddrs(syscall.RTM_GET, configured.ownedRouteRequestAddrs())
+}
+
+func (configured *IPv4Route) ownedRouteRequestAddrs() []route.Addr {
+	addrs := make([]route.Addr, syscall.RTAX_IFP+1)
+	addrs[syscall.RTAX_DST] = &route.Inet4Addr{IP: configured.target.As4()}
+	addrs[syscall.RTAX_NETMASK] = &route.Inet4Addr{IP: [4]byte{255, 255, 255, 255}}
+	addrs[syscall.RTAX_IFP] = &route.LinkAddr{Index: configured.iface.Index, Name: configured.name}
+	return addrs
+}
+
+func (configured *IPv4Route) requestWithAddrs(kind int, addrs []route.Addr) (*route.RouteMessage, error) {
 	fd, err := unix.Socket(unix.AF_ROUTE, unix.SOCK_RAW, unix.AF_UNSPEC)
 	if err != nil {
 		return nil, err
 	}
 	defer unix.Close(fd)
 	sequence := int(routeSequence.Add(1))
-	message := &route.RouteMessage{Version: syscall.RTM_VERSION, Type: kind, Flags: syscall.RTF_UP | syscall.RTF_HOST | syscall.RTF_STATIC, ID: uintptr(os.Getpid()), Seq: sequence, Addrs: []route.Addr{
-		&route.Inet4Addr{IP: configured.target.As4()},
-		&route.LinkAddr{Index: configured.iface.Index, Name: configured.name},
-		&route.Inet4Addr{IP: [4]byte{255, 255, 255, 255}},
-	}}
+	message := &route.RouteMessage{Version: syscall.RTM_VERSION, Type: kind, Flags: syscall.RTF_UP | syscall.RTF_HOST | syscall.RTF_STATIC, ID: uintptr(os.Getpid()), Seq: sequence, Addrs: addrs}
 	payload, err := message.Marshal()
 	if err != nil {
 		return nil, err
@@ -429,6 +444,14 @@ func (configured *IPv4Route) matches(message *route.RouteMessage) bool {
 	}
 	link, linkOK := message.Addrs[syscall.RTAX_IFP].(*route.LinkAddr)
 	return linkOK && link.Index == configured.iface.Index
+}
+
+func routeInterfaceIndex(message *route.RouteMessage) int {
+	link, ok := message.Addrs[syscall.RTAX_IFP].(*route.LinkAddr)
+	if !ok {
+		return 0
+	}
+	return link.Index
 }
 
 func (configured *IPv4Route) isTargetHostRoute(message *route.RouteMessage) bool {
