@@ -20,10 +20,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for path in /private /private/var /private/var/run /private/var/root /usr /usr/local /usr/local/libexec /Library /Library/LaunchDaemons; do
+          printf 'runner uid=%s groups=%s\n' "$(id -u)" "$(id -Gn)"
+          for path in /private /private/var /private/var/run /private/var/root /private/var/db /usr /usr/local /usr/local/libexec /Library /Library/LaunchDaemons /Library/PrivilegedHelperTools "/Library/Application Support"; do
             printf '%s\n' "-- $path"
-            stat -f 'owner=%u group=%g mode=%Lp type=%HT' "$path"
-            ls -ldeO "$path"
+            if [[ -e $path || -L $path ]]; then
+              stat -f 'owner=%u group=%g mode=%Lp type=%HT' "$path"
+              ls -ldeO "$path"
+              if [[ -x $path ]]; then printf 'runner_traverse=yes\n'; else printf 'runner_traverse=no\n'; fi
+            else
+              printf 'absent\n'
+            fi
           done
       - name: Install, query, and uninstall the synthetic daemon on the disposable runner
         shell: bash
