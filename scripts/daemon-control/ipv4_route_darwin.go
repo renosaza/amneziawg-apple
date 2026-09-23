@@ -246,7 +246,7 @@ func (configured *IPv4Route) Close() error {
 	if configured.addressSet {
 		problems = append(problems, configured.removeAddress())
 	}
-	if configured.upChanged && !configured.addressSet {
+	if configured.upChanged {
 		problems = append(problems, configured.restoreInterfaceFlags())
 	}
 	return errors.Join(problems...)
@@ -262,7 +262,7 @@ func (configured *IPv4Route) removeAddress() error {
 	if C.delete_address(cName, cLocal) != 0 {
 		return errors.New("delete synthetic IPv4 address")
 	}
-	configured.addressSet = false
+	configured.recordAddressRemoval(nil)
 	return nil
 }
 
@@ -327,9 +327,14 @@ func (configured *IPv4Route) restoreInterfaceFlags() error {
 		desired |= int(C.IFF_UP)
 	}
 	if desired == actual {
+		configured.recordFlagRestore(nil)
 		return nil
 	}
-	return configured.setInterfaceFlags(desired)
+	if err := configured.setInterfaceFlags(desired); err != nil {
+		return err
+	}
+	configured.recordFlagRestore(nil)
+	return nil
 }
 
 func (configured *IPv4Route) verify() error {
@@ -349,10 +354,32 @@ func (configured *IPv4Route) write(kind int) error {
 	if err != nil {
 		return err
 	}
-	if message.Err == nil && kind == syscall.RTM_ADD {
+	configured.recordRouteWrite(kind, message.Err)
+	return message.Err
+}
+
+func (configured *IPv4Route) recordRouteWrite(kind int, err error) {
+	if err != nil {
+		return
+	}
+	if kind == syscall.RTM_ADD {
 		configured.routeSet = true
 	}
-	return message.Err
+	if kind == syscall.RTM_DELETE {
+		configured.routeSet = false
+	}
+}
+
+func (configured *IPv4Route) recordAddressRemoval(err error) {
+	if err == nil {
+		configured.addressSet = false
+	}
+}
+
+func (configured *IPv4Route) recordFlagRestore(err error) {
+	if err == nil {
+		configured.upChanged = false
+	}
 }
 
 func (configured *IPv4Route) request(kind int) (*route.RouteMessage, error) {

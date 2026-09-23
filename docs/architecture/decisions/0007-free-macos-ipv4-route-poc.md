@@ -19,5 +19,6 @@ dispatch-only; it does not configure physical routes, IPv6, DNS, or traffic.
 Before assignment, reject an IPv4 local address already present on any
 interface. Before `SIOCDIFADDR`, require the current address and peer to still
 belong to the recorded `utun`; an unavailable or conflicting ioctl view leaves
-the address and interface flags untouched. If this POC raised `IFF_UP`, restore
-only that flag after its owned address is gone.
+the address intact and reports the error. If this POC raised `IFF_UP`, restore
+only that flag in a separate cleanup phase even when address cleanup fails, so
+the remaining address ownership can be retried safely.
