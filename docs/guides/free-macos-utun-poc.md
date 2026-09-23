@@ -42,9 +42,9 @@ sudo scripts/utun-poc.sh status /private/tmp/amneziawg-utun-poc.XXXXXX
 ```
 
 Press Control-C in the `run` terminal to stop exactly those three child
-processes, remove their name/PID/log files, and unlink their exact UAPI
-sockets. If the launcher was interrupted, use `stop` with the printed run
-directory.
+processes and remove their name/PID/log files. The backend closes its own UAPI
+sockets; the launcher never unlinks a socket. If the launcher was interrupted,
+use `stop` with the printed run directory.
 
 Success proves only PID-to-`utun`-to-UAPI isolation for empty devices. It does
 not prove handshake, traffic, endpoint bypass, routing policy, or safe

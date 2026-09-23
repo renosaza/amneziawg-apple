@@ -35,7 +35,7 @@ require_root() {
 }
 
 require_binary() {
-    [[ $# == 1 && -x $1 && -f $1 ]] || fail "amneziawg-go must be an executable file"
+    [[ $# == 1 && $1 == /* && $1 != *$'\n'* && -x $1 && -f $1 ]] || fail "amneziawg-go must be an absolute executable file"
 }
 
 safe_run_directory() {
@@ -55,14 +55,11 @@ pid_from_file() {
 }
 
 stop_devices() {
-    local dir=$1 n pid command name i remaining=0
+    local dir=$1 n pid i remaining=0
     for n in 1 2 3; do
-        pid=$(pid_from_file "$dir/pid.$n" || true)
-        [[ -n $pid ]] || continue
-        command=$(ps -p "$pid" -o command= 2>/dev/null || true)
-        if [[ $command == *" -f utun"* ]]; then
-            kill -TERM "$pid" 2>/dev/null || true
-        fi
+        process_is_owned "$dir" "$n" || fail "refusing to stop an unverified process; preserving $dir"
+        pid=$(pid_from_file "$dir/pid.$n")
+        kill -TERM "$pid" 2>/dev/null || true
     done
     for ((i = 0; i < 30; i++)); do
         remaining=0
@@ -75,10 +72,9 @@ stop_devices() {
     done
     [[ $remaining == 0 ]] || fail "a POC process did not stop; preserving $dir"
     for n in 1 2 3; do
-        name=$(tr -d '\r\n' < "$dir/name.$n" 2>/dev/null || true)
-        [[ $name =~ ^utun[0-9]+$ ]] && rm -f "$UAPI_DIR/$name.sock"
-        rm -f "$dir/pid.$n" "$dir/name.$n" "$dir/log.$n"
+        rm -f "$dir/pid.$n" "$dir/start.$n" "$dir/name.$n" "$dir/log.$n"
     done
+    rm -f "$dir/binary"
     rmdir "$dir" 2>/dev/null || true
 }
 
@@ -92,15 +88,29 @@ launch_device() {
     local binary=$1 dir=$2 n=$3
     WG_TUN_NAME_FILE="$dir/name.$n" LOG_LEVEL=error "$binary" -f utun >"$dir/log.$n" 2>&1 &
     printf '%s\n' "$!" > "$dir/pid.$n"
+    ps -p "$!" -o lstart= > "$dir/start.$n"
+}
+
+process_is_owned() {
+    local dir=$1 n=$2 pid binary expected_start actual_start command
+    pid=$(pid_from_file "$dir/pid.$n") || return 1
+    [[ -f $dir/binary && -f $dir/start.$n ]] || return 1
+    IFS= read -r binary < "$dir/binary" || return 1
+    IFS= read -r expected_start < "$dir/start.$n" || return 1
+    actual_start=$(ps -p "$pid" -o lstart= 2>/dev/null) || return 1
+    command=$(ps -p "$pid" -o command= 2>/dev/null) || return 1
+    [[ $actual_start == "$expected_start" && $command == "$binary -f utun" ]]
+}
+
+names_are_ready() {
+    local dir=$1 n
+    for n in 1 2 3; do [[ -s $dir/name.$n ]] || return 1; done
 }
 
 wait_for_devices() {
     local dir=$1 n i name previous
     for ((i = 0; i < 100; i++)); do
-        for n in 1 2 3; do
-            [[ -s $dir/name.$n ]] || break
-        done
-        [[ $n == 3 && -s $dir/name.3 ]] && break
+        names_are_ready "$dir" && break
         sleep 0.05
     done
     for n in 1 2 3; do
@@ -120,11 +130,15 @@ show_status() {
     for n in 1 2 3; do
         pid=$(pid_from_file "$dir/pid.$n") || fail "missing PID for device $n"
         IFS= read -r name < "$dir/name.$n" || fail "missing interface name for device $n"
-        kill -0 "$pid" 2>/dev/null || fail "device $n is not running"
+        process_is_owned "$dir" "$n" || fail "device $n is not the recorded POC process"
         [[ -S $UAPI_DIR/$name.sock ]] || fail "device $n UAPI socket is missing"
         printf 'device %s: pid=%s utun=%s uapi=%s/%s.sock\n' "$n" "$pid" "$name" "$UAPI_DIR" "$name"
     done
 }
+
+if [[ ${UTUN_POC_LIB:-} == 1 ]]; then
+    return 0 2>/dev/null || exit 0
+fi
 
 case ${1:-} in
     dry-run)
@@ -143,13 +157,14 @@ case ${1:-} in
         run_dir=$(mktemp -d "/private/tmp/${RUN_PREFIX}XXXXXX")
         chmod 700 "$run_dir"
         trap 'stop_devices "$run_dir" || true' EXIT INT TERM
+        printf '%s\n' "$2" > "$run_dir/binary"
         for n in 1 2 3; do launch_device "$2" "$run_dir" "$n"; done
         wait_for_devices "$run_dir"
         echo "run directory: $run_dir"
         show_status "$run_dir"
         echo 'No addresses, peers, routes, DNS, or PF rules were configured. Press Ctrl-C to clean up.'
         while :; do
-            for n in 1 2 3; do kill -0 "$(pid_from_file "$run_dir/pid.$n")" 2>/dev/null || fail "device $n exited"; done
+            for n in 1 2 3; do process_is_owned "$run_dir" "$n" || fail "device $n exited or changed identity"; done
             sleep 1
         done
         ;;
