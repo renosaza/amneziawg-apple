@@ -5,12 +5,16 @@ package daemoncontrol
 import (
 	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+	"time"
 )
 
 const profileID = "11111111-2222-4333-8444-555555555555"
@@ -81,13 +85,63 @@ func TestRejectsUnauthorizedUIDBeforeRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response := exchange(t, server, 502, requestFrame(t, `{"version":1,"operation":"start","profile_id":"`+profileID+`"}`))
-	if response.OK || response.Error != "unauthorized" {
-		t.Fatalf("unexpected unauthorized response: %#v", response)
+	client, daemon := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		server.serve(daemon, 502)
+		_ = daemon.Close()
+		close(done)
+	}()
+	if err := client.SetWriteDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
 	}
+	if _, err := client.Write(requestFrame(t, `{"version":1,"operation":"start","profile_id":"`+profileID+`"}`)); !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("unauthorized connection was not dropped: %v", err)
+	}
+	_ = client.Close()
+	<-done
 	list := exchange(t, server, 501, requestFrame(t, `{"version":1,"operation":"list"}`))
 	if !list.OK || len(list.Profiles) != 0 {
 		t.Fatalf("unauthorized request changed state: %#v", list)
+	}
+}
+
+func TestMaximumListFitsOneFrame(t *testing.T) {
+	server, err := NewServer(501)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 1; index <= maxProfiles; index++ {
+		id := fmt.Sprintf("%08x-2222-4333-8444-555555555555", index)
+		if response := server.apply(request{Operation: "start", ProfileID: id}); !response.OK {
+			t.Fatalf("failed to start profile %d: %#v", index, response)
+		}
+	}
+	list := server.apply(request{Operation: "list"})
+	if len(list.Profiles) != maxProfiles || writeResponse(io.Discard, list) != nil {
+		t.Fatalf("maximum list does not fit a frame: %#v", list)
+	}
+	if response := server.apply(request{Operation: "start", ProfileID: "ffffffff-2222-4333-8444-555555555555"}); response.Error != "capacity" {
+		t.Fatalf("unexpected capacity response: %#v", response)
+	}
+}
+
+func TestRejectsTooLongSocketPathAndSymlinkAncestor(t *testing.T) {
+	tooLong := "/" + strings.Repeat("a", maxSocketPath)
+	if err := safeSocketPath(tooLong); err == nil {
+		t.Fatal("accepted an overlong Darwin socket path")
+	}
+	directory := t.TempDir()
+	target := filepath.Join(directory, "target")
+	if err := os.Mkdir(target, 0700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(directory, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := safeSocketPath(filepath.Join(link, "control.sock")); err == nil {
+		t.Fatal("accepted a symlink socket ancestor")
 	}
 }
 
@@ -112,7 +166,11 @@ func TestPeerUIDUsesDarwinCredentials(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("Darwin-only credential API")
 	}
-	directory := t.TempDir()
+	directory, err := os.MkdirTemp("/tmp", "awgd-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(directory)
 	path := filepath.Join(directory, "control.sock")
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {

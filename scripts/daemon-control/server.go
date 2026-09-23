@@ -23,8 +23,9 @@ import (
 
 const (
 	maxFrameBytes  = 4 * 1024
-	maxProfiles    = 64
+	maxProfiles    = 48
 	maxConnections = 16
+	maxSocketPath  = 103 // Darwin sun_path has room for a trailing NUL.
 )
 
 var umaskMu sync.Mutex
@@ -80,7 +81,6 @@ func (server *Server) handleConnection(connection *net.UnixConn) {
 
 func (server *Server) serve(connection io.ReadWriter, uid uint32) {
 	if uid != server.allowedUID {
-		_ = writeResponse(connection, response{Error: "unauthorized"})
 		return
 	}
 	frame, err := readFrame(connection)
@@ -253,7 +253,7 @@ func safeSocketPath(path string) error {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path || strings.ContainsAny(path, "\x00\n\r") {
 		return errors.New("socket path must be clean and absolute")
 	}
-	if len(path) >= syscall.SizeofSockaddrUnix {
+	if len(path) > maxSocketPath {
 		return errors.New("socket path is too long")
 	}
 	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
@@ -262,13 +262,18 @@ func safeSocketPath(path string) error {
 		}
 		return err
 	}
-	parent, err := os.Lstat(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	stat, ok := parent.Sys().(*syscall.Stat_t)
-	if !ok || parent.Mode()&os.ModeSymlink != 0 || !parent.IsDir() || stat.Uid != 0 || parent.Mode().Perm()&022 != 0 {
-		return errors.New("socket directory must be root-owned and non-writable")
+	for directory := filepath.Dir(path); ; directory = filepath.Dir(directory) {
+		info, err := os.Lstat(directory)
+		if err != nil {
+			return err
+		}
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || stat.Uid != 0 || info.Mode().Perm()&022 != 0 {
+			return errors.New("socket ancestor must be root-owned and non-writable")
+		}
+		if directory == "/" {
+			break
+		}
 	}
 	return nil
 }
