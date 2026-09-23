@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -90,5 +91,29 @@ func TestSyntheticIPv4OwnedRouteRequestIncludesIFP(t *testing.T) {
 	}
 	if addrs[syscall.RTAX_GATEWAY] != nil {
 		t.Fatal("owned route request placed the interface in the gateway slot")
+	}
+}
+
+func TestSyntheticIPv4RouteDiagnosticIncludesOnlyBoundedRouteMetadata(t *testing.T) {
+	configured := &IPv4Route{
+		name:   "utun7",
+		target: netip.MustParseAddr("192.0.2.10"),
+		iface:  &net.Interface{Index: 7, Name: "utun7"},
+	}
+	message := &route.RouteMessage{Flags: syscall.RTF_UP | syscall.RTF_HOST, Index: 7, Addrs: []route.Addr{
+		&route.Inet4Addr{IP: [4]byte{192, 0, 2, 10}},
+		&route.LinkAddr{Name: "utun7", Index: 7, Addr: []byte{1, 2, 3, 4, 5, 6}},
+		&route.Inet4Addr{IP: [4]byte{255, 255, 255, 255}},
+		nil,
+		&route.LinkAddr{Name: "utun7", Index: 7, Addr: []byte{1, 2, 3, 4, 5, 6}},
+	}}
+	diagnostic := configured.formatRouteOwnershipDiagnostic(message, "0.0.0.0/0(flags=0x1,index=1,ifp=link(name=\"en0\",index=1))")
+	for _, expected := range []string{"expected dst=192.0.2.10", "utun=\"utun7\"", "ifp_index=7", "rtm_index=7", "dst=192.0.2.10", "netmask=255.255.255.255", "gateway=link(name=\"utun7\",index=7)", "covering=0.0.0.0/0"} {
+		if !strings.Contains(diagnostic, expected) {
+			t.Fatalf("diagnostic missing %q: %s", expected, diagnostic)
+		}
+	}
+	if strings.Contains(diagnostic, "010203040506") {
+		t.Fatalf("diagnostic exposed link-layer address: %s", diagnostic)
 	}
 }

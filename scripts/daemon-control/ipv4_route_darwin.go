@@ -144,6 +144,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"unsafe"
@@ -163,6 +164,8 @@ type IPv4Route struct {
 }
 
 var routeSequence atomic.Uint32
+
+const routeDiagnosticLimit = 6
 
 var (
 	addressStateErrorCode = int(C.ADDRESS_STATE_ERROR)
@@ -346,7 +349,7 @@ func (configured *IPv4Route) verify() error {
 		return message.Err
 	}
 	if !configured.matches(message) {
-		return fmt.Errorf("synthetic route ownership changed: flags=%#x ifp_index=%d", message.Flags, routeInterfaceIndex(message))
+		return errors.New(configured.routeOwnershipDiagnostic(message))
 	}
 	return nil
 }
@@ -442,20 +445,91 @@ func (configured *IPv4Route) matches(message *route.RouteMessage) bool {
 	if !configured.isTargetHostRoute(message) {
 		return false
 	}
-	link, linkOK := message.Addrs[syscall.RTAX_IFP].(*route.LinkAddr)
+	link, linkOK := routeAddress(message, syscall.RTAX_IFP).(*route.LinkAddr)
 	return linkOK && link.Index == configured.iface.Index
 }
 
-func routeInterfaceIndex(message *route.RouteMessage) int {
-	link, ok := message.Addrs[syscall.RTAX_IFP].(*route.LinkAddr)
-	if !ok {
-		return 0
+func (configured *IPv4Route) routeOwnershipDiagnostic(message *route.RouteMessage) string {
+	return configured.formatRouteOwnershipDiagnostic(message, configured.coveringRoutes())
+}
+
+func (configured *IPv4Route) formatRouteOwnershipDiagnostic(message *route.RouteMessage, covering string) string {
+	return fmt.Sprintf("synthetic route ownership changed: expected dst=%s netmask=255.255.255.255 utun=%q ifp_index=%d; actual flags=%#x rtm_index=%d dst=%s netmask=%s gateway=%s ifp=%s; covering=%s", configured.target, configured.name, configured.iface.Index, message.Flags, message.Index, routeAddressValue(message, syscall.RTAX_DST), routeAddressValue(message, syscall.RTAX_NETMASK), routeAddressValue(message, syscall.RTAX_GATEWAY), routeAddressValue(message, syscall.RTAX_IFP), covering)
+}
+
+func (configured *IPv4Route) coveringRoutes() string {
+	rib, err := route.FetchRIB(syscall.AF_INET, route.RIBTypeRoute, 0)
+	if err != nil {
+		return "unavailable"
 	}
-	return link.Index
+	messages, err := route.ParseRIB(route.RIBTypeRoute, rib)
+	if err != nil {
+		return "unparseable"
+	}
+	var summaries []string
+	for _, parsed := range messages {
+		message, ok := parsed.(*route.RouteMessage)
+		if !ok {
+			continue
+		}
+		prefix, ok := routePrefix(message)
+		if !ok || !prefix.Contains(configured.target) {
+			continue
+		}
+		summaries = append(summaries, fmt.Sprintf("%s(flags=%#x,index=%d,ifp=%s)", prefix, message.Flags, message.Index, routeAddressValue(message, syscall.RTAX_IFP)))
+		if len(summaries) == routeDiagnosticLimit {
+			return strings.Join(summaries, ",") + ",truncated"
+		}
+	}
+	if len(summaries) == 0 {
+		return "none"
+	}
+	return strings.Join(summaries, ",")
+}
+
+func routePrefix(message *route.RouteMessage) (netip.Prefix, bool) {
+	destination, ok := routeAddress(message, syscall.RTAX_DST).(*route.Inet4Addr)
+	if !ok {
+		return netip.Prefix{}, false
+	}
+	if message.Flags&syscall.RTF_HOST != 0 {
+		return netip.PrefixFrom(netip.AddrFrom4(destination.IP), 32), true
+	}
+	mask, ok := routeAddress(message, syscall.RTAX_NETMASK).(*route.Inet4Addr)
+	if !ok {
+		return netip.Prefix{}, false
+	}
+	ones, bits := net.IPMask(mask.IP[:]).Size()
+	if bits != 32 {
+		return netip.Prefix{}, false
+	}
+	return netip.PrefixFrom(netip.AddrFrom4(destination.IP), ones).Masked(), true
+}
+
+func routeAddress(message *route.RouteMessage, index int) route.Addr {
+	if index >= len(message.Addrs) {
+		return nil
+	}
+	return message.Addrs[index]
+}
+
+func routeAddressValue(message *route.RouteMessage, index int) string {
+	switch address := routeAddress(message, index).(type) {
+	case *route.Inet4Addr:
+		return netip.AddrFrom4(address.IP).String()
+	case *route.Inet6Addr:
+		return netip.AddrFrom16(address.IP).String()
+	case *route.LinkAddr:
+		return fmt.Sprintf("link(name=%q,index=%d)", address.Name, address.Index)
+	case nil:
+		return "absent"
+	default:
+		return fmt.Sprintf("family=%d", address.Family())
+	}
 }
 
 func (configured *IPv4Route) isTargetHostRoute(message *route.RouteMessage) bool {
-	destination, destinationOK := message.Addrs[syscall.RTAX_DST].(*route.Inet4Addr)
-	mask, maskOK := message.Addrs[syscall.RTAX_NETMASK].(*route.Inet4Addr)
+	destination, destinationOK := routeAddress(message, syscall.RTAX_DST).(*route.Inet4Addr)
+	mask, maskOK := routeAddress(message, syscall.RTAX_NETMASK).(*route.Inet4Addr)
 	return destinationOK && maskOK && message.Flags&syscall.RTF_HOST != 0 && destination.IP == configured.target.As4() && mask.IP == [4]byte{255, 255, 255, 255}
 }
