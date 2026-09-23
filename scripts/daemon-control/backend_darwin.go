@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -23,13 +24,28 @@ const tunnelStatePrefix = "amneziawg-daemon."
 
 var utunName = regexp.MustCompile(`^utun[0-9]+$`)
 
-type tunnelBackend struct{ binary string }
+type syntheticIPv4RouteSpec struct{ local, peer, target string }
+
+var syntheticIPv4RouteSpecs = [...]syntheticIPv4RouteSpec{
+	{local: "192.0.2.2", peer: "192.0.2.1", target: "192.0.2.10"},
+	{local: "192.0.2.4", peer: "192.0.2.3", target: "192.0.2.11"},
+	{local: "192.0.2.6", peer: "192.0.2.5", target: "192.0.2.12"},
+}
+
+type tunnelBackend struct {
+	binary              string
+	syntheticIPv4Routes bool
+	routesMu            sync.Mutex
+	routeSlots          [len(syntheticIPv4RouteSpecs)]bool
+}
 type tunnelProcess struct {
-	command  *exec.Cmd
-	done     <-chan struct{}
-	dir      string
-	name     string
-	baseline map[string]bool
+	command   *exec.Cmd
+	done      <-chan struct{}
+	dir       string
+	name      string
+	baseline  map[string]bool
+	route     *IPv4Route
+	routeSlot int
 }
 
 func newTunnelBackend(binary string) (Backend, error) {
@@ -89,14 +105,20 @@ func (backend *tunnelBackend) Start(config string) (Session, error) {
 	}
 	done := make(chan struct{})
 	go func() { _ = command.Wait(); close(done) }()
-	process := &tunnelProcess{command: command, done: done, dir: directory, baseline: baseline}
+	process := &tunnelProcess{command: command, done: done, dir: directory, baseline: baseline, routeSlot: -1}
 	name, err := waitForTunnel(process, nameFile)
 	if err == nil {
 		process.name = name
 		err = uapi(name, "set=1\n"+config)
 	}
+	if err == nil && backend.syntheticIPv4Routes {
+		err = backend.configureSyntheticIPv4Route(process)
+	}
 	if err != nil {
-		return Session{}, errors.Join(err, backend.Stop(Session{value: process}))
+		if cleanupErr := backend.Stop(Session{value: process}); cleanupErr != nil {
+			return Session{value: process}, errors.Join(err, cleanupErr)
+		}
+		return Session{}, err
 	}
 	return Session{value: process}, nil
 }
@@ -121,7 +143,19 @@ func (backend *tunnelBackend) Stop(session Session) error {
 	}
 	select {
 	case <-process.done:
+		if process.route != nil {
+			if err := process.route.proveAbsentAfterTunnelExit(); err != nil {
+				return err
+			}
+			process.route = nil
+		}
 	default:
+		if process.route != nil {
+			if err := process.route.Close(); err != nil {
+				return err
+			}
+			process.route = nil
+		}
 		if err := process.command.Process.Signal(syscall.SIGTERM); err != nil && !errors.Is(err, os.ErrProcessDone) {
 			return err
 		}
@@ -140,7 +174,38 @@ func (backend *tunnelBackend) Stop(session Session) error {
 		}
 	}
 	_ = os.Remove(filepath.Join(process.dir, "name"))
-	return os.Remove(process.dir)
+	if err := os.Remove(process.dir); err != nil {
+		return err
+	}
+	backend.releaseRouteSlot(process)
+	return nil
+}
+
+func (backend *tunnelBackend) configureSyntheticIPv4Route(process *tunnelProcess) error {
+	backend.routesMu.Lock()
+	defer backend.routesMu.Unlock()
+	for index, claimed := range backend.routeSlots {
+		if claimed {
+			continue
+		}
+		backend.routeSlots[index] = true
+		process.routeSlot = index
+		spec := syntheticIPv4RouteSpecs[index]
+		route, err := configureSyntheticIPv4Route(process, spec.local, spec.peer, spec.target)
+		process.route = route
+		return err
+	}
+	return errors.New("synthetic IPv4 route capacity reached")
+}
+
+func (backend *tunnelBackend) releaseRouteSlot(process *tunnelProcess) {
+	if process.routeSlot < 0 || process.routeSlot >= len(backend.routeSlots) {
+		return
+	}
+	backend.routesMu.Lock()
+	backend.routeSlots[process.routeSlot] = false
+	backend.routesMu.Unlock()
+	process.routeSlot = -1
 }
 
 func currentUtuns() (map[string]bool, error) {

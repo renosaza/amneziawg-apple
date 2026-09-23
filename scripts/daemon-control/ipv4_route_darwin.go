@@ -166,6 +166,8 @@ var routeSequence atomic.Uint32
 
 var errRouteOutcomeUnknown = errors.New("route kernel outcome unknown")
 
+var syntheticIPv4Prefix = netip.MustParsePrefix("192.0.2.0/24")
+
 var (
 	addressStateErrorCode = int(C.ADDRESS_STATE_ERROR)
 	addressStateAbsent    = int(C.ADDRESS_STATE_ABSENT)
@@ -223,8 +225,8 @@ func ipv4(values ...string) (netip.Addr, netip.Addr, netip.Addr, error) {
 	var result [3]netip.Addr
 	for index, value := range values {
 		address, err := netip.ParseAddr(value)
-		if err != nil || !address.Is4() || !address.IsGlobalUnicast() {
-			return netip.Addr{}, netip.Addr{}, netip.Addr{}, errors.New("synthetic address must be global IPv4")
+		if err != nil || !address.Is4() || !syntheticIPv4Prefix.Contains(address) {
+			return netip.Addr{}, netip.Addr{}, netip.Addr{}, errors.New("synthetic address must be TEST-NET IPv4")
 		}
 		result[index] = address
 	}
@@ -353,6 +355,40 @@ func (configured *IPv4Route) verify() error {
 	return nil
 }
 
+// proveAbsentAfterTunnelExit releases ownership only after the vanished utun
+// cannot retain this address or exact route. Any conflicting or uncertain
+// state stays attached to the session for a later cleanup attempt.
+func (configured *IPv4Route) proveAbsentAfterTunnelExit() error {
+	interfaces, err := currentUtuns()
+	if err != nil {
+		return err
+	}
+	if interfaces[configured.name] {
+		return errors.New("owned utun remains after backend exit")
+	}
+	cName, cLocal, cPeer := C.CString(configured.name), C.CString(configured.local), C.CString(configured.peer)
+	defer C.free(unsafe.Pointer(cName))
+	defer C.free(unsafe.Pointer(cLocal))
+	defer C.free(unsafe.Pointer(cPeer))
+	if state := int(C.address_ownership(cName, cLocal, cPeer)); state != addressStateAbsent {
+		return requireAddressState("verify vanished synthetic IPv4 address", state, addressStateAbsent)
+	}
+	message, err := configured.requestTargetLookup()
+	if err != nil {
+		return err
+	}
+	if message.Err != nil {
+		return message.Err
+	}
+	if configured.isTargetHostRoute(message) {
+		return errors.New("synthetic route remains after backend exit")
+	}
+	configured.routeSet = false
+	configured.addressSet = false
+	configured.upChanged = false
+	return nil
+}
+
 func (configured *IPv4Route) write(kind int) error {
 	message, err := configured.request(kind)
 	if err != nil {
@@ -410,6 +446,16 @@ func (configured *IPv4Route) request(kind int) (*route.RouteMessage, error) {
 
 func (configured *IPv4Route) requestRouteLookup() (*route.RouteMessage, error) {
 	return configured.requestWithAddrs(syscall.RTM_GET, configured.routeLookupAddrs())
+}
+
+func (configured *IPv4Route) requestTargetLookup() (*route.RouteMessage, error) {
+	return configured.requestWithAddrs(syscall.RTM_GET, configured.requestTargetLookupAddrs())
+}
+
+func (configured *IPv4Route) requestTargetLookupAddrs() []route.Addr {
+	return []route.Addr{
+		&route.Inet4Addr{IP: configured.target.As4()},
+	}
 }
 
 func (configured *IPv4Route) routeLookupAddrs() []route.Addr {
