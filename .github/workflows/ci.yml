@@ -19,6 +19,9 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: Sources/WireGuardKitGo/go.mod
+          cache-dependency-path: Sources/WireGuardKitGo/go.sum
+      - name: Prepare unsigned build configuration
+        run: cp Sources/WireGuardApp/Config/Developer.xcconfig.template Sources/WireGuardApp/Config/Developer.xcconfig
       - name: Verify the selected macOS application target
         shell: bash
         run: |
