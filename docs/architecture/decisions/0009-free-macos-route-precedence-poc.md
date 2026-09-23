@@ -24,6 +24,11 @@ verifies effective lookup of `198.51.100.10` through its recorded gateway and
 interface. Each route preflights an equivalent route, retains unknown-write
 recovery state, and deletes only after it still proves ownership.
 
+The fallback preflight rejects an effective route more specific than `/24` for
+its probe. If a concurrent more-specific route shadows the probe after add,
+cleanup may use an exact RIB `/24` match only to locate its own route for
+deletion; RIB data alone never proves effective route precedence.
+
 ## Consequences
 
 This is evidence for longest-prefix precedence only. It does not create a

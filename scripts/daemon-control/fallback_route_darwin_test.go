@@ -36,6 +36,20 @@ func TestSyntheticFallbackRouteOwnership(t *testing.T) {
 	if configured.isFallbackRoute(&host) {
 		t.Fatal("accepted a host route as fallback")
 	}
+	shadow := fallbackRouteMessage(8, syscall.RTF_UP|syscall.RTF_HOST, configured.probe().As4(), [4]byte{}, "utun8")
+	if !configured.isMoreSpecificRoute(shadow) {
+		t.Fatal("did not reject a foreign host route shadowing the fallback probe")
+	}
+	partialShadow := fallbackRouteMessage(8, syscall.RTF_UP, configured.prefix.Addr().As4(), [4]byte{255, 255, 255, 128}, "utun8")
+	if !configured.isMoreSpecificRoute(partialShadow) {
+		t.Fatal("did not reject a foreign partial prefix shadowing the fallback probe")
+	}
+	if !configured.canRecoverShadowedRoute(shadow, true) {
+		t.Fatal("did not allow owner-checked cleanup of a shadowed fallback")
+	}
+	if configured.canRecoverShadowedRoute(defaultRoute, true) {
+		t.Fatal("accepted RIB ownership without an effective shadow route")
+	}
 	lookup := effectiveRouteLookupAddrs(configured.probe())
 	if _, ok := lookup[syscall.RTAX_IFP].(*route.LinkAddr); !ok || lookup[syscall.RTAX_NETMASK] != nil {
 		t.Fatal("fallback lookup did not request only destination and interface metadata")

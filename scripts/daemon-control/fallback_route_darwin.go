@@ -40,6 +40,9 @@ func configureSyntheticFallbackRoute(process *tunnelProcess) (*SyntheticFallback
 	if configured.isFallbackRoute(existing) {
 		return nil, errors.New("refusing to replace an existing fallback route")
 	}
+	if configured.isMoreSpecificRoute(existing) {
+		return nil, errors.New("refusing a fallback route shadowed by a more-specific route")
+	}
 	if err := configured.add(); err != nil {
 		return configured.cleanupFailedRouteAdd(err)
 	}
@@ -55,8 +58,19 @@ func (configured *SyntheticFallbackRoute) Close() error {
 	if !configured.routeSet {
 		return nil
 	}
-	if err := configured.verify(); err != nil {
+	message, err := configured.lookup()
+	if err != nil || message.Err != nil {
+		return errors.Join(err, message.Err)
+	}
+	if configured.ownsRoute(message) {
+		return configured.write(syscall.RTM_DELETE)
+	}
+	ownedInRIB, err := configured.ownsRouteInRIB()
+	if err != nil {
 		return err
+	}
+	if !configured.canRecoverShadowedRoute(message, ownedInRIB) {
+		return errors.New("synthetic fallback route ownership changed")
 	}
 	return configured.write(syscall.RTM_DELETE)
 }
@@ -127,7 +141,52 @@ func (configured *SyntheticFallbackRoute) ownsRoute(message *route.RouteMessage)
 }
 
 func (configured *SyntheticFallbackRoute) isFallbackRoute(message *route.RouteMessage) bool {
-	destination, destinationOK := routeAddress(message, syscall.RTAX_DST).(*route.Inet4Addr)
-	mask, maskOK := routeAddress(message, syscall.RTAX_NETMASK).(*route.Inet4Addr)
-	return destinationOK && maskOK && message.Flags&syscall.RTF_UP != 0 && message.Flags&syscall.RTF_HOST == 0 && destination.IP == configured.prefix.Addr().As4() && mask.IP == syntheticFallbackMask
+	prefix, ok := routePrefix(message)
+	return ok && message.Flags&syscall.RTF_UP != 0 && message.Flags&syscall.RTF_HOST == 0 && prefix == configured.prefix
+}
+
+func (configured *SyntheticFallbackRoute) isMoreSpecificRoute(message *route.RouteMessage) bool {
+	prefix, ok := routePrefix(message)
+	return ok && message.Flags&syscall.RTF_UP != 0 && prefix.Contains(configured.probe()) && prefix.Bits() > configured.prefix.Bits()
+}
+
+func (configured *SyntheticFallbackRoute) canRecoverShadowedRoute(effective *route.RouteMessage, ownedInRIB bool) bool {
+	return ownedInRIB && configured.isMoreSpecificRoute(effective)
+}
+
+func (configured *SyntheticFallbackRoute) ownsRouteInRIB() (bool, error) {
+	rib, err := route.FetchRIB(syscall.AF_INET, route.RIBTypeRoute, 0)
+	if err != nil {
+		return false, err
+	}
+	messages, err := route.ParseRIB(route.RIBTypeRoute, rib)
+	if err != nil {
+		return false, err
+	}
+	for _, parsed := range messages {
+		message, ok := parsed.(*route.RouteMessage)
+		if ok && configured.ownsRoute(message) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func routePrefix(message *route.RouteMessage) (netip.Prefix, bool) {
+	destination, ok := routeAddress(message, syscall.RTAX_DST).(*route.Inet4Addr)
+	if !ok {
+		return netip.Prefix{}, false
+	}
+	if message.Flags&syscall.RTF_HOST != 0 {
+		return netip.PrefixFrom(netip.AddrFrom4(destination.IP), 32), true
+	}
+	mask, ok := routeAddress(message, syscall.RTAX_NETMASK).(*route.Inet4Addr)
+	if !ok {
+		return netip.Prefix{}, false
+	}
+	ones, bits := net.IPMask(mask.IP[:]).Size()
+	if bits != 32 {
+		return netip.Prefix{}, false
+	}
+	return netip.PrefixFrom(netip.AddrFrom4(destination.IP), ones).Masked(), true
 }
