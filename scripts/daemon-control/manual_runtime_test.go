@@ -55,11 +55,14 @@ func TestManualSyntheticThreeTunnelLifecycle(t *testing.T) {
 	t.Cleanup(func() {
 		if err := configured.Close(); err != nil {
 			t.Errorf("route cleanup failed: %v", err)
+			return
 		}
+		t.Logf("removed synthetic route target=%s interface=%s index=%d", configured.target, configured.name, configured.iface.Index)
 	})
 	if err := configured.verify(); err != nil {
 		t.Fatal(err)
 	}
+	t.Logf("owned synthetic route target=%s interface=%s index=%d", configured.target, configured.name, configured.iface.Index)
 	if stopped := server.apply(request{Operation: "stop", ProfileID: profileIDTwo}); !stopped.OK {
 		t.Fatalf("stop middle tunnel failed: %#v", stopped)
 	}
