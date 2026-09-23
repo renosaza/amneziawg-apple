@@ -22,7 +22,8 @@ let package = Package(
             sources: [
                 "WireGuardKit",
                 "Shared/Model/String+ArrayConversion.swift",
-                "Shared/Model/TunnelConfiguration+WgQuickConfig.swift"
+                "Shared/Model/TunnelConfiguration+WgQuickConfig.swift",
+                "Shared/Model/DaemonProfileStore.swift"
             ]
         ),
         .target(

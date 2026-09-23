@@ -42,6 +42,7 @@ jobs:
           set -euo pipefail
           swift test list | tee /tmp/swiftpm-tests.txt
           grep -Fq 'ExcludeIPsTests/' /tmp/swiftpm-tests.txt
+          grep -Fq 'DaemonProfileStoreTests/' /tmp/swiftpm-tests.txt
           grep -Fq 'RouteOwnershipValidatorTests/' /tmp/swiftpm-tests.txt
           grep -Fq 'NetworkChangeEndpointTests/' /tmp/swiftpm-tests.txt
           swift test
