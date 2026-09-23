@@ -16,6 +16,15 @@ jobs:
         with:
           go-version-file: scripts/daemon-control/go.mod
           cache-dependency-path: scripts/daemon-control/go.sum
+      - name: Inspect fixed runtime and install parents
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in /private /private/var /private/var/run /private/var/root /usr /usr/local /usr/local/libexec /Library /Library/LaunchDaemons; do
+            printf '%s\n' "-- $path"
+            stat -f 'owner=%u group=%g mode=%Lp type=%HT' "$path"
+            ls -ldeO "$path"
+          done
       - name: Install, query, and uninstall the synthetic daemon on the disposable runner
         shell: bash
         run: |
@@ -38,4 +47,4 @@ jobs:
           test ! -e /Library/LaunchDaemons/com.amneziawg.daemon-control.poc.plist
           test ! -e /usr/local/libexec/amneziawg-daemon-control-poc
           test ! -e /usr/local/libexec/amneziawg-go-daemon-control-poc
-          test ! -e /var/run/amneziawg-daemon-control-poc
+          test ! -e /private/var/run/amneziawg-daemon-control-poc
