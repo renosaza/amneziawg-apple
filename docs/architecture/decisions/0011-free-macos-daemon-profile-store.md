@@ -33,6 +33,10 @@ Save stages a versioned pending Keychain item before committing metadata, then
 promotes it to the UUID's active item. A `0600` non-secret journal completes or
 rolls back an interrupted operation under an advisory file lock; a later store
 call recovers an interrupted transaction without guessing at secret content.
+If a pending item remains without a journal, the store either discards it while
+preserving an existing active item, restores it only when matching metadata has
+no active item, or fails closed for an unowned active secret. Metadata and
+journal replacement and removal use checked directory-descriptor `fsync` calls.
 Failures before a metadata commit restore the previous state. After a metadata
 commit, the journal completes the operation on a later call instead of trying
 to guess whether a Keychain mutation reached durable storage. Rename changes

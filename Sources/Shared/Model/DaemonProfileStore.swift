@@ -107,6 +107,7 @@ final class DaemonProfileStore {
             guard let metadata = try readDocument().profiles.first(where: { $0.id == id }) else {
                 throw DaemonProfileStoreError.profileNotFound
             }
+            try reconcileUnjournaledPending(id: id, metadata: metadata)
             guard var secret = try secrets.read(id, .active) else {
                 throw DaemonProfileStoreError.secretMissing
             }
@@ -128,14 +129,12 @@ final class DaemonProfileStore {
 
         try withLock {
             let oldDocument = try readDocument()
+            try reconcileUnjournaledPending(id: id, metadata: oldDocument.profiles.first(where: { $0.id == id }))
             var newDocument = oldDocument
             if let index = newDocument.profiles.firstIndex(where: { $0.id == id }) {
                 newDocument.profiles[index].name = validName
             } else {
                 newDocument.profiles.append(DaemonProfileMetadata(id: id, name: validName))
-            }
-            guard try secrets.read(id, .pending) == nil else {
-                throw DaemonProfileStoreError.metadataCorrupt
             }
             let transaction = Transaction(operation: .save, phase: .prepared, id: id, name: validName)
             try writeJournal(transaction)
@@ -296,20 +295,44 @@ final class DaemonProfileStore {
         try secrets.delete(id, .pending)
     }
 
+    private func reconcileUnjournaledPending(id: UUID, metadata: DaemonProfileMetadata?) throws {
+        guard var pending = try secrets.read(id, .pending) else { return }
+        defer { pending.resetBytes(in: 0..<pending.count) }
+        var active = try secrets.read(id, .active)
+        defer {
+            if active != nil {
+                let count = active!.count
+                active!.resetBytes(in: 0..<count)
+            }
+        }
+
+        switch (metadata, active) {
+        case (nil, nil):
+            try secrets.delete(id, .pending)
+        case (.some, .some):
+            try secrets.delete(id, .pending)
+        case let (.some(metadata), nil):
+            guard let configuration = String(data: pending, encoding: .utf8) else {
+                throw DaemonProfileStoreError.invalidConfiguration
+            }
+            _ = try validatedConfiguration(configuration, name: metadata.name)
+            try secrets.write(id, .active, pending)
+            try secrets.delete(id, .pending)
+        case (nil, .some):
+            throw DaemonProfileStoreError.metadataCorrupt
+        }
+    }
+
     private func ensureDirectory() throws {
         try FileManager.default.createDirectory(
             at: directory,
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
-        let descriptor = open(directory.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-        guard descriptor >= 0 else {
-            throw DaemonProfileStoreError.fileOperationFailed
-        }
-        defer { _ = Darwin.close(descriptor) }
-        try validateDirectoryDescriptor(descriptor)
-        guard fchmod(descriptor, mode_t(0o700)) == 0 else {
-            throw DaemonProfileStoreError.fileOperationFailed
+        try withDirectoryDescriptor { descriptor in
+            guard fchmod(descriptor, mode_t(0o700)) == 0 else {
+                throw DaemonProfileStoreError.fileOperationFailed
+            }
         }
     }
 
@@ -349,63 +372,92 @@ final class DaemonProfileStore {
     }
 
     private func readProtectedFile(at url: URL, maximumBytes: Int) throws -> Data? {
-        let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
-        if descriptor < 0 {
-            if errno == ENOENT { return nil }
-            throw DaemonProfileStoreError.fileOperationFailed
-        }
-        defer { _ = Darwin.close(descriptor) }
-        try validateProtectedDescriptor(descriptor, expectedMode: 0o600)
-        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: false)
-        do {
-            guard let data = try handle.read(upToCount: maximumBytes + 1), data.count <= maximumBytes else {
-                throw DaemonProfileStoreError.metadataTooLarge
+        try withDirectoryDescriptor { directoryDescriptor in
+            let descriptor = openat(directoryDescriptor, url.lastPathComponent, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+            if descriptor < 0 {
+                if errno == ENOENT { return nil }
+                throw DaemonProfileStoreError.fileOperationFailed
             }
-            return data
-        } catch let error as DaemonProfileStoreError {
-            throw error
-        } catch {
-            throw DaemonProfileStoreError.fileOperationFailed
+            defer { _ = Darwin.close(descriptor) }
+            try validateProtectedDescriptor(descriptor, expectedMode: 0o600)
+            let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: false)
+            do {
+                guard let data = try handle.read(upToCount: maximumBytes + 1), data.count <= maximumBytes else {
+                    throw DaemonProfileStoreError.metadataTooLarge
+                }
+                return data
+            } catch let error as DaemonProfileStoreError {
+                throw error
+            } catch {
+                throw DaemonProfileStoreError.fileOperationFailed
+            }
         }
     }
 
     private func writeProtectedFile(_ data: Data, to url: URL) throws {
-        let temporaryURL = directory.appendingPathComponent(".\(url.lastPathComponent)-\(UUID().uuidString).tmp", isDirectory: false)
-        defer { try? FileManager.default.removeItem(at: temporaryURL) }
+        try withDirectoryDescriptor { directoryDescriptor in
+            let temporaryName = ".\(url.lastPathComponent)-\(UUID().uuidString).tmp"
+            defer { _ = unlinkat(directoryDescriptor, temporaryName, 0) }
 
-        let descriptor = open(temporaryURL.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, mode_t(0o600))
-        guard descriptor >= 0 else {
-            throw DaemonProfileStoreError.fileOperationFailed
-        }
-        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
-        do {
-            try handle.write(contentsOf: data)
-            try handle.synchronize()
-            try handle.close()
-        } catch {
-            try? handle.close()
-            throw DaemonProfileStoreError.fileOperationFailed
-        }
-        guard chmod(temporaryURL.path, mode_t(0o600)) == 0,
-              Darwin.rename(temporaryURL.path, url.path) == 0
-        else {
-            throw DaemonProfileStoreError.fileOperationFailed
+            let descriptor = openat(directoryDescriptor, temporaryName, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, mode_t(0o600))
+            guard descriptor >= 0 else {
+                throw DaemonProfileStoreError.fileOperationFailed
+            }
+            let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+            do {
+                try handle.write(contentsOf: data)
+                try handle.synchronize()
+                try handle.close()
+            } catch {
+                try? handle.close()
+                throw DaemonProfileStoreError.fileOperationFailed
+            }
+            guard renameat(directoryDescriptor, temporaryName, directoryDescriptor, url.lastPathComponent) == 0,
+                  fsync(directoryDescriptor) == 0
+            else {
+                throw DaemonProfileStoreError.fileOperationFailed
+            }
         }
     }
 
     private func removeProtectedFile(at url: URL) throws {
-        var info = stat()
-        if lstat(url.path, &info) != 0 {
-            if errno == ENOENT { return }
+        try withDirectoryDescriptor { directoryDescriptor in
+            var pathInfo = stat()
+            if fstatat(directoryDescriptor, url.lastPathComponent, &pathInfo, AT_SYMLINK_NOFOLLOW) != 0 {
+                if errno == ENOENT { return }
+                throw DaemonProfileStoreError.fileOperationFailed
+            }
+            guard (pathInfo.st_mode & S_IFMT) == S_IFREG,
+                  pathInfo.st_uid == getuid(),
+                  pathInfo.st_mode & 0o077 == 0
+            else {
+                throw DaemonProfileStoreError.insecureMetadata
+            }
+            let descriptor = openat(directoryDescriptor, url.lastPathComponent, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+            guard descriptor >= 0 else {
+                throw DaemonProfileStoreError.fileOperationFailed
+            }
+            defer { _ = Darwin.close(descriptor) }
+            var descriptorInfo = stat()
+            guard fstat(descriptor, &descriptorInfo) == 0,
+                  descriptorInfo.st_dev == pathInfo.st_dev,
+                  descriptorInfo.st_ino == pathInfo.st_ino,
+                  unlinkat(directoryDescriptor, url.lastPathComponent, 0) == 0,
+                  fsync(directoryDescriptor) == 0
+            else {
+                throw DaemonProfileStoreError.insecureMetadata
+            }
+        }
+    }
+
+    private func withDirectoryDescriptor<T>(_ body: (Int32) throws -> T) throws -> T {
+        let descriptor = open(directory.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard descriptor >= 0 else {
             throw DaemonProfileStoreError.fileOperationFailed
         }
-        guard (info.st_mode & S_IFMT) == S_IFREG,
-              info.st_uid == getuid(),
-              info.st_mode & 0o077 == 0,
-              unlink(url.path) == 0
-        else {
-            throw DaemonProfileStoreError.insecureMetadata
-        }
+        defer { _ = Darwin.close(descriptor) }
+        try validateDirectoryDescriptor(descriptor)
+        return try body(descriptor)
     }
 
     private func validateProtectedDescriptor(_ descriptor: Int32, expectedMode: mode_t) throws {

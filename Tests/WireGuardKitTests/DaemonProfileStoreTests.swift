@@ -68,6 +68,73 @@ final class DaemonProfileStoreTests: XCTestCase {
         XCTAssertNil(fixture.secrets.pendingValue(for: id))
     }
 
+    func testPreparedJournalWithoutPendingRollsBack() throws {
+        let fixture = try Fixture()
+        let id = UUID()
+        let journal = """
+        {"operation":"save","phase":"prepared","id":"\(id.uuidString.lowercased())","name":"Prepared"}
+        """
+        try Data(journal.utf8).write(to: fixture.journalURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fixture.journalURL.path)
+
+        XCTAssertTrue(try fixture.store.profiles().isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.journalURL.path))
+    }
+
+    func testStagedJournalAfterMetadataAndActiveCommitIsRemoved() throws {
+        let fixture = try Fixture()
+        let id = UUID()
+        let config = Self.configuration()
+        fixture.secrets.write(id, .active, Data(config.utf8))
+        let metadata = "{\"profiles\":[{\"id\":\"(id.uuidString.lowercased())\",\"name\":\"Committed\"}]}"
+        try Data(metadata.utf8).write(to: fixture.metadataURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fixture.metadataURL.path)
+        let journal = """
+        {"operation":"save","phase":"staged","id":"\(id.uuidString.lowercased())","name":"Committed"}
+        """
+        try Data(journal.utf8).write(to: fixture.journalURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fixture.journalURL.path)
+
+        XCTAssertEqual(try fixture.store.configuration(for: id).name, "Committed")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.journalURL.path))
+    }
+
+    func testUnjournaledPendingWithoutMetadataIsDiscardedBeforeSave() throws {
+        let fixture = try Fixture()
+        let id = UUID()
+        fixture.secrets.write(id, .pending, Data(Self.configuration().utf8))
+
+        try fixture.store.save(id: id, name: "Recovered", wgQuickConfig: Self.configuration())
+        XCTAssertEqual(try fixture.store.configuration(for: id).name, "Recovered")
+        XCTAssertNil(fixture.secrets.pendingValue(for: id))
+    }
+
+    func testUnjournaledPendingRestoresMissingActiveSecretForMetadata() throws {
+        let fixture = try Fixture()
+        let id = UUID()
+        let config = Self.configuration()
+        try fixture.store.save(id: id, name: "Synthetic", wgQuickConfig: config)
+        fixture.secrets.write(id, .pending, Data(config.utf8))
+        try fixture.secrets.delete(id, .active)
+
+        XCTAssertEqual(try fixture.store.configuration(for: id).name, "Synthetic")
+        XCTAssertEqual(fixture.secrets.activeValue(for: id), Data(config.utf8))
+        XCTAssertNil(fixture.secrets.pendingValue(for: id))
+    }
+
+    func testUnjournaledPendingPreservesExistingActiveSecret() throws {
+        let fixture = try Fixture()
+        let id = UUID()
+        let active = Self.configuration()
+        try fixture.store.save(id: id, name: "Synthetic", wgQuickConfig: active)
+        let replacement = Self.configuration()
+        fixture.secrets.write(id, .pending, Data(replacement.utf8))
+
+        XCTAssertEqual(try fixture.store.configuration(for: id).name, "Synthetic")
+        XCTAssertEqual(fixture.secrets.activeValue(for: id), Data(active.utf8))
+        XCTAssertNil(fixture.secrets.pendingValue(for: id))
+    }
+
     func testConfigurationRoundTripsExcludeIPs() throws {
         let fixture = try Fixture()
         let id = UUID()
