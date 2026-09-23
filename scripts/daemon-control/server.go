@@ -128,6 +128,12 @@ func (server *Server) apply(request request) response {
 		}
 		sort.Slice(profiles, func(i, j int) bool { return profiles[i].ID < profiles[j].ID })
 		return response{OK: true, Profiles: profiles}
+	case "quiesce":
+		if len(server.profiles) != 0 {
+			return response{Error: "active_sessions"}
+		}
+		server.closed = true
+		return response{OK: true}
 	case "start":
 		if _, found := server.profiles[request.ProfileID]; found {
 			return response{Error: "already_running"}
@@ -203,9 +209,9 @@ func decodeRequest(frame []byte) (request, error) {
 		return request, errors.New("unsupported protocol version")
 	}
 	switch request.Operation {
-	case "list":
+	case "list", "quiesce":
 		if request.ProfileID != "" || request.Config != "" {
-			return request, errors.New("list does not accept a profile")
+			return request, errors.New("operation does not accept a profile")
 		}
 	case "start":
 		request.ProfileID = strings.ToLower(request.ProfileID)

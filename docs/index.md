@@ -11,6 +11,7 @@
 - [Decision 0007](architecture/decisions/0007-free-macos-ipv4-route-poc.md): native synthetic IPv4 route experiment.
 - [Decision 0008](architecture/decisions/0008-free-macos-physical-endpoint-route-poc.md): synthetic physical endpoint-route experiment.
 - [Decision 0009](architecture/decisions/0009-free-macos-route-precedence-poc.md): synthetic fallback and specific-route precedence experiment.
+- [Decision 0010](architecture/decisions/0010-free-macos-daemon-install-poc.md): manual LaunchDaemon installation experiment.
 - [Building](BUILDING.md): local macOS build and signing prerequisites.
 - [Local development](guides/local-development.md): verified development checks.
 - [Troubleshooting](guides/troubleshooting.md): verified local toolchain limitation.
