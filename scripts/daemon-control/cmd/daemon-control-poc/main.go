@@ -43,19 +43,22 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	defer func() {
-		_ = server.Close()
-		_ = listener.Close()
-	}()
+	defer listener.Close()
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-signals
-		_ = server.Close()
 		_ = listener.Close()
 	}()
 	if err := server.Serve(listener); err != nil {
 		fmt.Fprintln(os.Stderr, err)
+		if cleanupErr := server.Close(); cleanupErr != nil {
+			fmt.Fprintln(os.Stderr, "daemon cleanup failed")
+		}
+		os.Exit(1)
+	}
+	if err := server.Close(); err != nil {
+		fmt.Fprintln(os.Stderr, "daemon cleanup failed")
 		os.Exit(1)
 	}
 }

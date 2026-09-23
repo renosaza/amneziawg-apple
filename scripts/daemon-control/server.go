@@ -122,7 +122,7 @@ func (server *Server) apply(request request) response {
 		profiles := make([]Profile, 0, len(server.profiles))
 		for id, session := range server.profiles {
 			if server.backend.Status(session) != nil {
-				delete(server.profiles, id)
+				profiles = append(profiles, Profile{ID: id, Status: "degraded"})
 				continue
 			}
 			profiles = append(profiles, Profile{ID: id, Status: "running"})
@@ -158,7 +158,6 @@ func (server *Server) apply(request request) response {
 			return response{Error: "not_found"}
 		}
 		if err := server.backend.Status(session); err != nil {
-			delete(server.profiles, request.ProfileID)
 			return response{Error: "status_failed"}
 		}
 		return response{OK: true, Profile: &Profile{ID: request.ProfileID, Status: "running"}}
