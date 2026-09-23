@@ -17,9 +17,10 @@ import (
 func main() {
 	socket := flag.String("socket", "", "root-owned directory socket path")
 	uidText := flag.String("uid", "", "authorized non-root macOS UID")
+	binary := flag.String("binary", "", "trusted absolute amneziawg-go path")
 	flag.Parse()
-	if flag.NArg() != 0 || *socket == "" || *uidText == "" {
-		fmt.Fprintln(os.Stderr, "usage: daemon-control-poc -socket /var/run/name.sock -uid <macOS-uid>")
+	if flag.NArg() != 0 || *socket == "" || *uidText == "" || *binary == "" {
+		fmt.Fprintln(os.Stderr, "usage: daemon-control-poc -socket /var/run/name.sock -uid <macOS-uid> -binary /root-owned/amneziawg-go")
 		os.Exit(2)
 	}
 	uid, err := parseUID(*uidText)
@@ -27,7 +28,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	server, err := daemoncontrol.NewServer(uid)
+	backend, err := daemoncontrol.NewTunnelBackend(*binary)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	server, err := daemoncontrol.NewServerWithBackend(uid, backend)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)

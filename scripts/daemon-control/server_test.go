@@ -18,6 +18,24 @@ import (
 )
 
 const profileID = "11111111-2222-4333-8444-555555555555"
+const syntheticConfig = "private_key=synthetic"
+
+type fakeBackend struct {
+	config string
+	starts int
+	stops  int
+	fail   bool
+}
+
+func (backend *fakeBackend) Start(config string) (Session, error) {
+	backend.config, backend.starts = config, backend.starts+1
+	if backend.fail {
+		return Session{}, errors.New("synthetic failure")
+	}
+	return Session{}, nil
+}
+func (backend *fakeBackend) Stop(Session) error   { backend.stops++; return nil }
+func (backend *fakeBackend) Status(Session) error { return nil }
 
 func exchange(t *testing.T, server *Server, uid uint32, frame []byte) response {
 	t.Helper()
@@ -54,13 +72,17 @@ func requestFrame(t *testing.T, request string) []byte {
 }
 
 func TestStartStopStatusAndList(t *testing.T) {
-	server, err := NewServer(501)
+	backend := &fakeBackend{}
+	server, err := NewServerWithBackend(501, backend)
 	if err != nil {
 		t.Fatal(err)
 	}
-	start := exchange(t, server, 501, requestFrame(t, `{"version":1,"operation":"start","profile_id":"`+profileID+`"}`))
+	start := exchange(t, server, 501, requestFrame(t, `{"version":1,"operation":"start","profile_id":"`+profileID+`","config":"`+syntheticConfig+`"}`))
 	if !start.OK || start.Profile == nil || start.Profile.Status != "running" {
 		t.Fatalf("unexpected start response: %#v", start)
+	}
+	if backend.config != syntheticConfig || backend.starts != 1 {
+		t.Fatalf("backend received unexpected config")
 	}
 	status := exchange(t, server, 501, requestFrame(t, `{"version":1,"operation":"status","profile_id":"`+profileID+`"}`))
 	if !status.OK || status.Profile == nil || status.Profile.ID != profileID {
@@ -74,9 +96,27 @@ func TestStartStopStatusAndList(t *testing.T) {
 	if !stop.OK || stop.Profile == nil || stop.Profile.Status != "stopped" {
 		t.Fatalf("unexpected stop response: %#v", stop)
 	}
+	if backend.stops != 1 {
+		t.Fatalf("backend was not stopped")
+	}
 	notFound := exchange(t, server, 501, requestFrame(t, `{"version":1,"operation":"status","profile_id":"`+profileID+`"}`))
 	if notFound.OK || notFound.Error != "not_found" {
 		t.Fatalf("unexpected missing status response: %#v", notFound)
+	}
+}
+
+func TestRejectsInvalidOrFailedStart(t *testing.T) {
+	server, err := NewServerWithBackend(501, &fakeBackend{fail: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := exchange(t, server, 501, requestFrame(t, `{"version":1,"operation":"start","profile_id":"`+profileID+`","config":"`+syntheticConfig+`"}`))
+	if failed.OK || failed.Error != "start_failed" {
+		t.Fatalf("unexpected start failure: %#v", failed)
+	}
+	invalid := exchange(t, server, 501, requestFrame(t, `{"version":1,"operation":"start","profile_id":"`+profileID+`","config":"get=1"}`))
+	if invalid.OK || invalid.Error != "invalid_request" {
+		t.Fatalf("unexpected invalid config: %#v", invalid)
 	}
 }
 
@@ -95,7 +135,7 @@ func TestRejectsUnauthorizedUIDBeforeRequest(t *testing.T) {
 	if err := client.SetWriteDeadline(time.Now().Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.Write(requestFrame(t, `{"version":1,"operation":"start","profile_id":"`+profileID+`"}`)); !errors.Is(err, io.ErrClosedPipe) {
+	if _, err := client.Write(requestFrame(t, `{"version":1,"operation":"start","profile_id":"`+profileID+`","config":"`+syntheticConfig+`"}`)); !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatalf("unauthorized connection was not dropped: %v", err)
 	}
 	_ = client.Close()
