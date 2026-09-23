@@ -14,7 +14,7 @@ typealias EndpointResolutionResult = Result<(Endpoint, Endpoint), DNSResolutionE
 
 class PacketTunnelSettingsGenerator {
     let tunnelConfiguration: TunnelConfiguration
-    let resolvedEndpoints: [Endpoint?]
+    private(set) var resolvedEndpoints: [Endpoint?]
 
     init(tunnelConfiguration: TunnelConfiguration, resolvedEndpoints: [Endpoint?]) {
         self.tunnelConfiguration = tunnelConfiguration
@@ -150,6 +150,47 @@ class PacketTunnelSettingsGenerator {
             }
         }
         return (wgSettings, resolutionResults)
+    }
+
+    /// Resets every peer endpoint to its configured value after a network change.
+    /// Hostnames are resolved again; a failed lookup keeps the last known address.
+    func endpointUapiConfigurationAfterNetworkChange() -> (String, [EndpointResolutionResult?], Bool) {
+        let configuredEndpoints = tunnelConfiguration.peers.map { $0.endpoint }
+        let results = DNSResolver.resolveSync(endpoints: configuredEndpoints)
+        assert(results.count == tunnelConfiguration.peers.count)
+        assert(resolvedEndpoints.count == tunnelConfiguration.peers.count)
+
+        var wgSettings = ""
+        var resolutionResults = [EndpointResolutionResult?]()
+        var endpointsChanged = false
+
+        for (index, peer) in tunnelConfiguration.peers.enumerated() {
+            if let configuredEndpoint = configuredEndpoints[index], !configuredEndpoint.hasHostAsIPAddress() {
+                switch results[index] {
+                case .success(let resolvedEndpoint)?:
+                    resolutionResults.append(.success((configuredEndpoint, resolvedEndpoint)))
+                    endpointsChanged = endpointsChanged || resolvedEndpoints[index] != resolvedEndpoint
+                    resolvedEndpoints[index] = resolvedEndpoint
+                case .failure(let error)?:
+                    resolutionResults.append(.failure(error))
+                case nil:
+                    resolutionResults.append(nil)
+                }
+            } else {
+                resolutionResults.append(nil)
+            }
+
+            guard let endpoint = resolvedEndpoints[index] else { continue }
+            wgSettings.append("public_key=\(peer.publicKey.hexKey)\n")
+            wgSettings.append("endpoint=\(endpoint.stringRepresentation)\n")
+        }
+
+        return (wgSettings, resolutionResults, endpointsChanged)
+    }
+
+    func restoreResolvedEndpoints(_ endpoints: [Endpoint?]) {
+        assert(endpoints.count == tunnelConfiguration.peers.count)
+        resolvedEndpoints = endpoints
     }
 
     func generateNetworkSettings() -> NEPacketTunnelNetworkSettings {
