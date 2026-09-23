@@ -57,6 +57,9 @@ type Server struct {
 	profiles    map[string]Session
 	backend     Backend
 	connections chan struct{}
+	closed      bool
+	closeOnce   sync.Once
+	closeError  error
 }
 
 func NewServer(allowedUID uint32) (*Server, error) {
@@ -110,11 +113,18 @@ func (server *Server) serve(connection io.ReadWriter, uid uint32) {
 func (server *Server) apply(request request) response {
 	server.mu.Lock()
 	defer server.mu.Unlock()
+	if server.closed {
+		return response{Error: "shutting_down"}
+	}
 
 	switch request.Operation {
 	case "list":
 		profiles := make([]Profile, 0, len(server.profiles))
-		for id := range server.profiles {
+		for id, session := range server.profiles {
+			if server.backend.Status(session) != nil {
+				delete(server.profiles, id)
+				continue
+			}
 			profiles = append(profiles, Profile{ID: id, Status: "running"})
 		}
 		sort.Slice(profiles, func(i, j int) bool { return profiles[i].ID < profiles[j].ID })
@@ -148,12 +158,32 @@ func (server *Server) apply(request request) response {
 			return response{Error: "not_found"}
 		}
 		if err := server.backend.Status(session); err != nil {
+			delete(server.profiles, request.ProfileID)
 			return response{Error: "status_failed"}
 		}
 		return response{OK: true, Profile: &Profile{ID: request.ProfileID, Status: "running"}}
 	default:
 		return response{Error: "invalid_request"}
 	}
+}
+
+// Close prevents new operations and stops every child owned by this server.
+func (server *Server) Close() error {
+	server.closeOnce.Do(func() {
+		server.mu.Lock()
+		server.closed = true
+		sessions := server.profiles
+		server.profiles = make(map[string]Session)
+		server.mu.Unlock()
+		var problems []error
+		for _, session := range sessions {
+			if err := server.backend.Stop(session); err != nil {
+				problems = append(problems, err)
+			}
+		}
+		server.closeError = errors.Join(problems...)
+	})
+	return server.closeError
 }
 
 func decodeRequest(frame []byte) (request, error) {

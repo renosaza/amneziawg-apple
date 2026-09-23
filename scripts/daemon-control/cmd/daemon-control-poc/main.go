@@ -43,11 +43,15 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	defer listener.Close()
+	defer func() {
+		_ = server.Close()
+		_ = listener.Close()
+	}()
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-signals
+		_ = server.Close()
 		_ = listener.Close()
 	}()
 	if err := server.Serve(listener); err != nil {

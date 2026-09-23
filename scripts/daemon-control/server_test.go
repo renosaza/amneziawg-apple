@@ -120,6 +120,33 @@ func TestRejectsInvalidOrFailedStart(t *testing.T) {
 	}
 }
 
+func TestCloseStopsOwnedSessionsAndRejectsNewWork(t *testing.T) {
+	backend := &fakeBackend{}
+	server, err := NewServerWithBackend(501, backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response := server.apply(request{Operation: "start", ProfileID: profileID, Config: syntheticConfig}); !response.OK {
+		t.Fatalf("start: %#v", response)
+	}
+	if err := server.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if backend.stops != 1 {
+		t.Fatalf("stops=%d", backend.stops)
+	}
+	if response := server.apply(request{Operation: "list"}); response.Error != "shutting_down" {
+		t.Fatalf("unexpected close response: %#v", response)
+	}
+}
+
+func TestConfigAllowsAWGFields(t *testing.T) {
+	config := "private_key=synthetic\nJc=4\nJmin=40\nHeaderProtectionKey=synthetic\nRandomTrailers=1"
+	if err := validConfig(config); err != nil {
+		t.Fatalf("AWG config was rejected: %v", err)
+	}
+}
+
 func TestRejectsUnauthorizedUIDBeforeRequest(t *testing.T) {
 	server, err := NewServer(501)
 	if err != nil {

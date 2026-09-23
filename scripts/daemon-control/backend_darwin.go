@@ -47,6 +47,10 @@ func trustedBinary(path string) bool {
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm()&022 != 0 || info.Mode()&0111 == 0 {
 		return false
 	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || stat.Uid != 0 {
+		return false
+	}
 	for directory := filepath.Dir(path); ; directory = filepath.Dir(directory) {
 		info, err := os.Lstat(directory)
 		if err != nil {
