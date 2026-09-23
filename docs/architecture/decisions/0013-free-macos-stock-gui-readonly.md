@@ -1,5 +1,5 @@
 ---
-id: 0012-free-macos-stock-gui-readonly
+id: 0013-free-macos-stock-gui-readonly
 type: decision
 status: accepted
 scope: experimental-macos-gui
