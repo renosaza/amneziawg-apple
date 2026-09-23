@@ -1,7 +1,14 @@
+---
+type: constraints
+active_ids:
+  - C-DAEMON-EXPERIMENT
+---
+
 # Constraints
 
 - Keep the fork as an isolated patch series over `amnezia-vpn/amneziawg-apple`; replay it with rebase and inspect it with `git range-diff`.
-- Use native NetworkExtension routing. Do not add a routing daemon or persistent shell `route` workaround.
+- Use native NetworkExtension routing. Do not add a routing daemon or persistent shell `route` workaround in production.
+- `C-DAEMON-EXPERIMENT`: Decision 0003 permits only the root-only, no-configuration synthetic helper POC. It is not a production routing daemon, installer, or GUI backend.
 - Do not alter the AmneziaWG protocol or `amneziawg-go` for macOS UI multi-tunnel support.
 - Keep macOS multi-tunnel changes separate from iOS single-tunnel behavior.
 - A full route may coexist with a more-specific split route. Reject duplicate or ambiguous ownership within the same IP family before activation.

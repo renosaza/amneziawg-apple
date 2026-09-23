@@ -1,0 +1,36 @@
+name: macOS utun helper POC
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  helper:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: Sources/WireGuardKitGo/go.mod
+          cache-dependency-path: Sources/WireGuardKitGo/go.sum
+      - name: Start, query, and stop one synthetic backend on the disposable runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          go build -C Sources/WireGuardKitGo -o ../../out/amneziawg-go github.com/amnezia-vpn/amneziawg-go/v3
+          go build -o out/macos-utun-helper-poc scripts/macos-utun-helper-poc.go
+          scripts/test-macos-utun-helper-poc.sh
+          sudo install -d -o root -g wheel -m 0755 /usr/local/libexec
+          sudo install -o root -g wheel -m 0755 out/amneziawg-go /usr/local/libexec/amneziawg-go-helper-poc
+          state_dir=$(sudo "$GITHUB_WORKSPACE/out/macos-utun-helper-poc" start -binary /usr/local/libexec/amneziawg-go-helper-poc | sed -n 's/^state_dir=//p')
+          case "$state_dir" in
+            /var/run/amneziawg-helper-poc.*) ;;
+            *) echo 'helper returned an invalid state directory' >&2; exit 1 ;;
+          esac
+          sudo "$GITHUB_WORKSPACE/out/macos-utun-helper-poc" status -state-dir "$state_dir"
+          sudo "$GITHUB_WORKSPACE/out/macos-utun-helper-poc" stop -state-dir "$state_dir"
+          test ! -e "$state_dir"
