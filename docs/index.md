@@ -4,6 +4,7 @@
 - [Architecture](architecture/README.md): macOS multi-tunnel boundaries and routing invariant.
 - [Decision 0001](architecture/decisions/0001-macos-multitunnel-routing.md): accepted routing and ownership policy.
 - [Decision 0002](architecture/decisions/0002-free-macos-utun-poc.md): limited no-fee `utun` experiment.
+- [Decision 0012](architecture/decisions/0012-macos-daemon-route-plan.md): pure route-plan experiment.
 - [Decision 0003](architecture/decisions/0003-free-macos-single-helper-prototype.md): root-only single-`utun` helper prototype.
 - [Decision 0004](architecture/decisions/0004-free-macos-daemon-control-poc.md): authenticated fake daemon-control boundary.
 - [Decision 0005](architecture/decisions/0005-free-macos-single-profile-daemon-poc.md): one-profile daemon lifecycle experiment.

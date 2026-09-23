@@ -18,6 +18,80 @@ public enum RouteOwnershipValidationError: Equatable {
     case missingEndpointExclusion(tunnelName: String, endpoint: String)
 }
 
+public enum MacOSDaemonRoutePlanError: Error, Equatable {
+    case routeOwnership(RouteOwnershipValidationError)
+    case invalidResolvedEndpoints
+}
+
+public struct MacOSDaemonRoutePlan: Codable, Equatable {
+    public enum Owner: String, Codable, Hashable {
+        case tunnel
+        case physicalEndpoint
+    }
+
+    public struct Route: Codable, Equatable, Hashable {
+        public let destination: String
+        public let owner: Owner
+
+        public init(destination: String, owner: Owner) {
+            self.destination = destination
+            self.owner = owner
+        }
+    }
+
+    public let routes: [Route]
+
+    public static func build(
+        activating name: String,
+        configuration: TunnelConfiguration,
+        resolvedEndpoints: [Endpoint?],
+        activeTunnels: [(name: String, configuration: TunnelConfiguration)]
+    ) -> Result<MacOSDaemonRoutePlan, MacOSDaemonRoutePlanError> {
+        if let error = RouteOwnershipValidator.validationError(
+            activating: name, configuration: configuration, against: activeTunnels)
+        {
+            return .failure(.routeOwnership(error))
+        }
+        guard configuration.peers.count == resolvedEndpoints.count else {
+            return .failure(.invalidResolvedEndpoints)
+        }
+        var routes = RouteOwnershipValidator.effectiveRoutes(for: configuration).map {
+            Route(destination: $0.stringRepresentation, owner: .tunnel)
+        }
+        for (peer, resolvedEndpoint) in zip(configuration.peers, resolvedEndpoints) {
+            guard let configuredEndpoint = peer.endpoint else {
+                guard resolvedEndpoint == nil else { return .failure(.invalidResolvedEndpoints) }
+                continue
+            }
+            guard let resolvedEndpoint, configuredEndpoint.port == resolvedEndpoint.port,
+                  (!configuredEndpoint.hasHostAsIPAddress() || configuredEndpoint.host == resolvedEndpoint.host),
+                  let route = endpointRange(resolvedEndpoint)
+            else {
+                return .failure(.invalidResolvedEndpoints)
+            }
+            routes.append(Route(destination: route.stringRepresentation, owner: .physicalEndpoint))
+        }
+        return .success(MacOSDaemonRoutePlan(routes: Array(Set(routes)).sorted {
+            $0.destination == $1.destination ?
+                $0.owner.rawValue < $1.owner.rawValue :
+                $0.destination < $1.destination
+        }))
+    }
+
+    private static func endpointRange(_ endpoint: Endpoint) -> IPAddressRange? {
+        switch endpoint.host {
+        case .ipv4(let address):
+            return IPAddressRange(address: address, networkPrefixLength: 32)
+        case .ipv6(let address):
+            return IPAddressRange(address: address, networkPrefixLength: 128)
+        case .name:
+            return nil
+        @unknown default:
+            return nil
+        }
+    }
+}
+
 public enum RouteOwnershipValidator {
     public static func validationError(
         activating name: String, configuration: TunnelConfiguration,
@@ -47,10 +121,10 @@ public enum RouteOwnershipValidator {
         configuration: TunnelConfiguration,
         against activeTunnels: [(name: String, configuration: TunnelConfiguration)]
     ) -> RouteOwnershipConflict? {
-        let candidate = routes(for: configuration)
+        let candidate = effectiveRoutes(for: configuration)
 
         for activeTunnel in activeTunnels {
-            let activeRoutes = routes(for: activeTunnel.configuration)
+            let activeRoutes = effectiveRoutes(for: activeTunnel.configuration)
             for candidateRoute in candidate {
                 for activeRoute in activeRoutes where intersects(candidateRoute, activeRoute) {
                     if hasDefaultRoute(configuration, familyOf: candidateRoute)
@@ -66,13 +140,15 @@ public enum RouteOwnershipValidator {
         return nil
     }
 
-    private static func routes(for configuration: TunnelConfiguration) -> [IPAddressRange] {
+    public static func effectiveRoutes(for configuration: TunnelConfiguration) -> [IPAddressRange] {
         configuration.peers.flatMap { peer in
             peer.allowedIPs.flatMap { allowedIP in
                 peer.excludeIPs.reduce([allowedIP]) { routes, excludedIP in
                     routes.flatMap { subtract($0, excludedIP) }
                 }
             }
+        }.map {
+            IPAddressRange(address: $0.maskedAddress(), networkPrefixLength: $0.networkPrefixLength)
         }
     }
 
