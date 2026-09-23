@@ -28,6 +28,7 @@ The reference head and the listed ten commits were checked on the date above. Th
 - `a93da9d` — `ExcludeIPs` wg-quick import/export and model preservation (`Local-Patch: exclude-ips`).
 - `bcb02a9` — macOS route ownership validation (`Local-Patch: multi-tunnel-routing-policy`).
 - `2ad467f` — local fork signing identifiers and secret hygiene (`Local-Patch: fork-signing-and-secret-hygiene`).
+- `449619c` — stop tracking the machine-local signing configuration (`Local-Patch: stop-tracking-local-signing-config`).
 
 ## Imported patch commits
 
