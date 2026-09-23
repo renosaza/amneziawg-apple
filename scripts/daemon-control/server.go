@@ -320,6 +320,9 @@ func (server *Server) Listen(path string) (*Listener, error) {
 	if err := safeSocketPath(path); err != nil {
 		return nil, err
 	}
+	if err := recoverStaleSocket(path, server.allowedUID); err != nil {
+		return nil, err
+	}
 	umaskMu.Lock()
 	previousUmask := syscall.Umask(0077)
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
@@ -349,12 +352,6 @@ func safeSocketPath(path string) error {
 	if len(path) > maxSocketPath {
 		return errors.New("socket path is too long")
 	}
-	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
-		if err == nil {
-			return errors.New("refusing to replace an existing socket path")
-		}
-		return err
-	}
 	for directory := filepath.Dir(path); ; directory = filepath.Dir(directory) {
 		info, err := os.Lstat(directory)
 		if err != nil {
@@ -369,6 +366,37 @@ func safeSocketPath(path string) error {
 		}
 	}
 	return nil
+}
+
+func recoverStaleSocket(path string, allowedUID uint32) error {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || info.Mode()&os.ModeSymlink != 0 || info.Mode()&os.ModeSocket == 0 || stat.Uid != allowedUID || info.Mode().Perm() != 0600 {
+		return fmt.Errorf("refusing to recover unexpected control socket %s", path)
+	}
+	connection, err := net.DialTimeout("unix", path, 200*time.Millisecond)
+	if err == nil {
+		_ = connection.Close()
+		return fmt.Errorf("refusing to recover active control socket %s", path)
+	}
+	if !errors.Is(err, syscall.ECONNREFUSED) {
+		return fmt.Errorf("refusing to recover uncertain control socket %s", path)
+	}
+	current, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	currentStat, ok := current.Sys().(*syscall.Stat_t)
+	if !ok || current.Mode()&os.ModeSymlink != 0 || current.Mode()&os.ModeSocket == 0 || currentStat.Uid != allowedUID || current.Mode().Perm() != 0600 || currentStat.Dev != stat.Dev || currentStat.Ino != stat.Ino {
+		return fmt.Errorf("control socket changed during stale recovery %s", path)
+	}
+	return os.Remove(path)
 }
 
 func (server *Server) Serve(listener *Listener) error {
