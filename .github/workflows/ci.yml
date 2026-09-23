@@ -30,6 +30,8 @@ jobs:
           plutil -extract project.targets json -o - /tmp/xcode-project.json | grep -Fq "\"${MACOS_APP_TARGET}\""
       - name: Build Go bridge
         run: make -C Sources/WireGuardKitGo
+      - name: Test the isolated daemon-control protocol POC
+        run: go test -C scripts/daemon-control ./...
       - name: Compile macOS target without signing
         run: xcodebuild -project WireGuard.xcodeproj -target "$MACOS_APP_TARGET" -configuration Debug -sdk macosx CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
       - name: Run all SwiftPM WireGuardKit tests
