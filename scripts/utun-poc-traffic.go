@@ -221,13 +221,17 @@ func uapi(name, request string) (map[string]string, error) {
 	return parseReply(reply.String())
 }
 
+func setRequest(request string) string {
+	return "set=1\n" + request
+}
+
 func configure(server, client *device) error {
 	serverRequest := fmt.Sprintf("private_key=%s\nlisten_port=%d\nreplace_peers=true\npublic_key=%s\nallowed_ip=%s/32", server.privateKey, server.port, client.publicKey, client.address)
-	if _, err := uapi(server.name, serverRequest); err != nil {
+	if _, err := uapi(server.name, setRequest(serverRequest)); err != nil {
 		return fmt.Errorf("configure %s: %w", server.label, err)
 	}
 	clientRequest := fmt.Sprintf("private_key=%s\nreplace_peers=true\npublic_key=%s\nallowed_ip=%s/32\nendpoint=127.0.0.1:%d\npersistent_keepalive_interval=1", client.privateKey, server.publicKey, server.address, server.port)
-	if _, err := uapi(client.name, clientRequest); err != nil {
+	if _, err := uapi(client.name, setRequest(clientRequest)); err != nil {
 		return fmt.Errorf("configure %s: %w", client.label, err)
 	}
 	return nil
@@ -381,6 +385,9 @@ func selfCheck() error {
 	}
 	if _, err := parseReply("errno=1\n"); err == nil {
 		return fmt.Errorf("UAPI error reply was accepted")
+	}
+	if setRequest("private_key=synthetic") != "set=1\nprivate_key=synthetic" {
+		return fmt.Errorf("UAPI set operation prefix is missing")
 	}
 	return nil
 }
