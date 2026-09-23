@@ -38,4 +38,4 @@ jobs:
           test ! -e /Library/LaunchDaemons/com.amneziawg.daemon-control.poc.plist
           test ! -e /usr/local/libexec/amneziawg-daemon-control-poc
           test ! -e /usr/local/libexec/amneziawg-go-daemon-control-poc
-          test ! -e /var/run/amneziawg-daemon-control-poc
+          test ! -e /private/var/db/amneziawg-daemon-control-poc

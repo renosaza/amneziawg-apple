@@ -24,7 +24,7 @@ disposable macOS runner.
 Maintain a manually invoked `sudo` script that installs fixed paths under
 `/usr/local/libexec`, a `root:wheel` `0644` plist at
 `/Library/LaunchDaemons/com.amneziawg.daemon-control.poc.plist`, and a
-root-owned `0755` socket directory below `/var/run`. The launcher accepts one
+root-owned `0755` socket directory below `/private/var/db`. The launcher accepts one
 non-root decimal UID. It must equal the graphical console UID; on a headless
 runner it must equal the original `sudo` caller.
 
@@ -36,7 +36,7 @@ as `root:wheel` `0755` before launch.
 Before uninstall, the script runs the installed daemon-control binary
 as the allowed UID. Its `-prepare-stop` mode sends an authenticated, keyless
 `quiesce` request that atomically rejects nonempty state and prevents a new
-session from racing the subsequent stop. Unknown socket or service state fails
+session from racing the subsequent stop. Before bootstrap it may remove only an orphaned socket whose type, owner and `0600` mode match the allowed UID, only after `lsof` proves no listener and launchd is unloaded; all other socket state fails closed. Unknown socket or service state fails
 closed. After that proof, `launchctl bootout` asks the daemon to clean its own
 children and socket before files are removed.
 

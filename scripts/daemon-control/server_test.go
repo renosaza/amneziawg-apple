@@ -467,3 +467,75 @@ func TestPeerUIDUsesDarwinCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func staleSocketPath(t *testing.T) string {
+	t.Helper()
+	directory, err := os.MkdirTemp("/tmp", "dcp-stale.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(directory) })
+	return filepath.Join(directory, "control.sock")
+}
+
+func TestRecoverStaleSocket(t *testing.T) {
+	path := staleSocketPath(t)
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.SetUnlinkOnClose(false)
+	if err := os.Chmod(path, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := recoverStaleSocket(path, uint32(os.Geteuid())); err != nil {
+		t.Fatalf("recover stale socket: %v", err)
+	}
+	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale socket remained: %v", err)
+	}
+}
+
+func TestRecoverStaleSocketRefusesLiveOrUnexpectedSocket(t *testing.T) {
+	path := staleSocketPath(t)
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	if err := os.Chmod(path, 0600); err != nil {
+		t.Fatal(err)
+	}
+	uid := uint32(os.Geteuid())
+	if err := recoverStaleSocket(path, uid); err == nil {
+		t.Fatal("recovered a live socket")
+	}
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	listener.SetUnlinkOnClose(false)
+	// Closing with unlink enabled removed the live socket; recreate a stale one.
+	listener, err = net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.SetUnlinkOnClose(false)
+	if err := os.Chmod(path, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := recoverStaleSocket(path, uid); err == nil {
+		t.Fatal("recovered a wrong-mode socket")
+	}
+	if err := os.Chmod(path, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := recoverStaleSocket(path, uid+1); err == nil {
+		t.Fatal("recovered a wrong-owner socket")
+	}
+}

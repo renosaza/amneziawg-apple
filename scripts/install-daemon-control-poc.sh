@@ -9,7 +9,7 @@ readonly label=com.amneziawg.daemon-control-poc
 readonly libexec_dir=/usr/local/libexec
 readonly daemon_path="$libexec_dir/amneziawg-daemon-control-poc"
 readonly backend_path="$libexec_dir/amneziawg-go-daemon-control-poc"
-readonly socket_dir=/private/var/run/amneziawg-daemon-control-poc
+readonly socket_dir=/private/var/db/amneziawg-daemon-control-poc
 readonly socket_path="$socket_dir/control.sock"
 readonly plist_path="/Library/LaunchDaemons/$label.plist"
 stage_temp=
@@ -111,7 +111,7 @@ validate_root_chain() {
 validate_destination_parents() {
     validate_root_chain /usr/local
     validate_root_chain /Library/LaunchDaemons
-    validate_root_chain /private/var/run
+    validate_root_chain /private/var/db
     validate_root_chain /private/var/root
 }
 
@@ -247,6 +247,19 @@ prepare_directories() {
     root_directory "$socket_dir" 755 || fail 'cannot secure socket directory'
 }
 
+recover_stale_socket() {
+    [[ ! -e $socket_path && ! -L $socket_path ]] && return
+    service_loaded && fail 'launchd is loaded while a stale socket exists; preserving it'
+    [[ -S $socket_path && ! -L $socket_path ]] || fail 'unexpected stale socket path; preserving it'
+    [[ $(owner_uid "$socket_path") == "$allowed_uid" && $(mode_bits "$socket_path") == 600 ]] || fail 'stale socket ownership changed; preserving it'
+    [[ -x /usr/sbin/lsof ]] || fail 'cannot verify stale socket listener; preserving it'
+    if /usr/sbin/lsof -n -U "$socket_path" >/dev/null 2>&1; then
+        fail 'stale socket still has a listener; preserving it'
+    fi
+    /bin/rm "$socket_path" || fail 'cannot remove verified stale socket'
+    [[ ! -e $socket_path && ! -L $socket_path ]] || fail 'stale socket removal was not confirmed'
+}
+
 rollback_fresh_install() {
     set +e
     cleanup_staging
@@ -266,9 +279,13 @@ install_fresh() {
     validate_source_binary "$daemon_source"
     validate_source_binary "$backend_source"
     validate_destination_parents
-    [[ ! -e $plist_path && ! -L $plist_path && ! -e $daemon_path && ! -L $daemon_path && ! -e $backend_path && ! -L $backend_path && ! -e $socket_dir && ! -L $socket_dir ]] || fail 'installation already exists; uninstall it before a fresh install'
+    [[ ! -e $plist_path && ! -L $plist_path && ! -e $daemon_path && ! -L $daemon_path && ! -e $backend_path && ! -L $backend_path ]] || fail 'installation already exists; uninstall it before a fresh install'
+    if [[ -e $socket_dir || -L $socket_dir ]]; then
+        root_directory "$socket_dir" 755 || fail 'existing socket directory is unsafe'
+    fi
     trap 'rollback_fresh_install' EXIT
     prepare_directories
+    recover_stale_socket
     stage_binary "$daemon_source" "$daemon_path"
     stage_binary "$backend_source" "$backend_path"
     write_plist
