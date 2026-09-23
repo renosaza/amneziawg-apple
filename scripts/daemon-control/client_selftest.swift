@@ -10,6 +10,7 @@ struct DaemonControlClientSelfTest {
             try testFraming()
             try testSocketTransport()
             try testResponses()
+            try testLifecycleProtocol()
             print("daemon-control Swift client self-check passed")
         } catch {
             fputs("daemon-control Swift client self-check failed: \(error)\n", stderr)
@@ -67,6 +68,76 @@ struct DaemonControlClientSelfTest {
         try expect(received == response)
     }
 
+    private static func testLifecycleProtocol() throws {
+        var descriptors = [Int32](repeating: -1, count: 2)
+        guard Darwin.socketpair(AF_UNIX, SOCK_STREAM, 0, &descriptors) == 0 else {
+            throw SelfTestError.socketPairFailed
+        }
+        defer {
+            _ = Darwin.close(descriptors[0])
+            _ = Darwin.close(descriptors[1])
+        }
+
+        let profileID = UUID(uuidString: "11111111-2222-4333-8444-555555555555")!
+        let testConfiguration = "private_key=test-only"
+        let deadline = DaemonControlProtocol.deadline(after: 1)
+        let start = try DaemonControlProtocol.makeRequest(
+            operation: "start",
+            profileID: profileID,
+            uapiConfiguration: testConfiguration
+        )
+        try DaemonControlProtocol.writeFrame(start, to: descriptors[0], deadline: deadline, sensitive: true)
+        let startRequest = try requestObject(try DaemonControlProtocol.readFrame(from: descriptors[1], deadline: deadline))
+        try expect(startRequest["version"] as? Int == 1)
+        try expect(startRequest["operation"] as? String == "start")
+        try expect(startRequest["profile_id"] as? String == profileID.uuidString.lowercased())
+        try expect(startRequest["config"] as? String == testConfiguration)
+
+        let startResponse = Data("{\"ok\":true,\"profile\":{\"id\":\"11111111-2222-4333-8444-555555555555\",\"status\":\"running\"}}".utf8)
+        try DaemonControlProtocol.writeFrame(startResponse, to: descriptors[1], deadline: deadline)
+        let started = try DaemonControlProtocol.decodeStartResponse(
+            DaemonControlProtocol.readFrame(from: descriptors[0], deadline: deadline),
+            expectedProfileID: profileID
+        )
+        try expect(started.id == profileID && started.state == .running)
+
+        let stop = try DaemonControlProtocol.makeRequest(operation: "stop", profileID: profileID)
+        try DaemonControlProtocol.writeFrame(stop, to: descriptors[0], deadline: deadline)
+        let stopRequest = try requestObject(try DaemonControlProtocol.readFrame(from: descriptors[1], deadline: deadline))
+        try expect(stopRequest["operation"] as? String == "stop")
+        try expect(stopRequest["profile_id"] as? String == profileID.uuidString.lowercased())
+        try expect(stopRequest["config"] == nil)
+
+        let stopResponse = Data("{\"ok\":true,\"profile\":{\"id\":\"11111111-2222-4333-8444-555555555555\",\"status\":\"stopped\"}}".utf8)
+        try DaemonControlProtocol.writeFrame(stopResponse, to: descriptors[1], deadline: deadline)
+        try DaemonControlProtocol.decodeStopResponse(
+            DaemonControlProtocol.readFrame(from: descriptors[0], deadline: deadline),
+            expectedProfileID: profileID
+        )
+
+        try expectFailure {
+            _ = try DaemonControlProtocol.makeRequest(
+                operation: "start",
+                profileID: profileID,
+                uapiConfiguration: String(repeating: "x", count: DaemonControlProtocol.maximumConfigurationBytes + 1)
+            )
+        }
+        let rejectedResponse = Data("{\"ok\":false,\"error\":\"private_key=test-only\",\"config\":\"private_key=test-only\"}".utf8)
+        do {
+            _ = try DaemonControlProtocol.decodeStartResponse(rejectedResponse, expectedProfileID: profileID)
+            throw SelfTestError.expectedFailure
+        } catch let error as DaemonControlClientError {
+            try expect(error == .daemonRejected)
+        }
+    }
+
+    private static func requestObject(_ data: Data) throws -> [String: Any] {
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw SelfTestError.invalidRequest
+        }
+        return object
+    }
+
     private static func expect(_ condition: @autoclosure () -> Bool) throws {
         guard condition() else { throw SelfTestError.expectationFailed }
     }
@@ -84,5 +155,6 @@ struct DaemonControlClientSelfTest {
         case expectationFailed
         case expectedFailure
         case socketPairFailed
+        case invalidRequest
     }
 }
