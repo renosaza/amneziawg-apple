@@ -56,17 +56,18 @@ func requireMacOSRoot() error {
 	return nil
 }
 
-func noExistingUtun() error {
+func baselineUtuns() (map[string]bool, error) {
 	interfaces, err := net.Interfaces()
 	if err != nil {
-		return err
+		return nil, err
 	}
+	baseline := make(map[string]bool)
 	for _, iface := range interfaces {
 		if strings.HasPrefix(iface.Name, "utun") {
-			return fail("existing utun interface found; use an idle disposable Mac")
+			baseline[iface.Name] = true
 		}
 	}
-	return nil
+	return baseline, nil
 }
 
 func ownedRegular(info os.FileInfo, mode os.FileMode) bool {
@@ -74,22 +75,45 @@ func ownedRegular(info os.FileInfo, mode os.FileMode) bool {
 	return ok && stat.Uid == 0 && info.Mode().IsRegular() && info.Mode().Perm() == mode
 }
 
-func validateBackend(path string) (string, error) {
+func validateBackendPath(path string) error {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path || strings.ContainsAny(path, "\x00\n\r") {
-		return "", fail("-binary must be a clean absolute path")
+		return fail("-binary must be a clean absolute path")
+	}
+	return nil
+}
+
+func trustedAncestor(path string) error {
+	for directory := filepath.Dir(path); ; directory = filepath.Dir(directory) {
+		info, err := os.Lstat(directory)
+		if err != nil {
+			return err
+		}
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || stat.Uid != 0 || info.Mode().Perm()&022 != 0 {
+			return fail("backend ancestor %s must be a root-owned, non-writable directory", directory)
+		}
+		if directory == "/" {
+			return nil
+		}
+	}
+}
+
+func validateBackend(path string) error {
+	if err := validateBackendPath(path); err != nil {
+		return err
 	}
 	info, err := os.Lstat(path)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm()&022 != 0 || info.Mode()&0111 == 0 {
-		return "", fail("-binary must be a root-owned, non-writable executable file")
+		return fail("-binary must be a root-owned, non-writable executable file")
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || stat.Uid != 0 {
-		return "", fail("-binary must be owned by root")
+		return fail("-binary must be owned by root")
 	}
-	return path, nil
+	return trustedAncestor(path)
 }
 
 func safeStateDirectory(path string) error {
@@ -191,7 +215,7 @@ func readState(directory string) (state, error) {
 	if err != nil {
 		return state{}, err
 	}
-	if _, err := validateBackend(binary); err != nil {
+	if err := validateBackendPath(binary); err != nil {
 		return state{}, err
 	}
 	pidText, err := readStateFile(directory, "pid")
@@ -274,11 +298,21 @@ func uapiReady(name string) error {
 	return nil
 }
 
-func waitForReady(directory string) (string, error) {
+func validateNewUtun(name string, baseline map[string]bool) error {
+	if baseline[name] {
+		return fail("backend reported baseline interface %s", name)
+	}
+	return nil
+}
+
+func waitForReady(directory string, baseline map[string]bool) (string, error) {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		name, err := readName(directory)
 		if err == nil {
+			if err := validateNewUtun(name, baseline); err != nil {
+				return "", err
+			}
 			if err := uapiReady(name); err == nil {
 				return name, nil
 			}
@@ -329,11 +363,11 @@ func start(binary string) (state, error) {
 	if err := requireMacOSRoot(); err != nil {
 		return state{}, err
 	}
-	if err := noExistingUtun(); err != nil {
+	baseline, err := baselineUtuns()
+	if err != nil {
 		return state{}, err
 	}
-	binary, err := validateBackend(binary)
-	if err != nil {
+	if err := validateBackend(binary); err != nil {
 		return state{}, err
 	}
 	directory, err := createStateDirectory()
@@ -364,7 +398,7 @@ func start(binary string) (state, error) {
 	if err := writeStateFile(directory, "started", started); err != nil {
 		return rollback(err)
 	}
-	name, err := waitForReady(directory)
+	name, err := waitForReady(directory, baseline)
 	if err != nil {
 		return rollback(err)
 	}
@@ -385,13 +419,54 @@ func waitForExit(value state) error {
 	return fail("backend did not stop after SIGTERM")
 }
 
+func deviceGone(name string) (bool, error) {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return false, err
+	}
+	for _, iface := range interfaces {
+		if iface.Name == name {
+			return false, nil
+		}
+	}
+	_, err = os.Lstat(filepath.Join(uapiDir, name+".sock"))
+	if err == nil {
+		return false, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	}
+	return false, err
+}
+
+func waitForDeviceGone(name string) error {
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
+		gone, err := deviceGone(name)
+		if err != nil {
+			return err
+		}
+		if gone {
+			return nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return fail("recorded utun or UAPI socket still exists")
+}
+
 func stop(value state) error {
 	owned, err := processIsOwned(value)
 	if err != nil {
 		return err
 	}
 	if !owned {
-		return fail("refusing to stop an unverified process")
+		gone, err := deviceGone(value.name)
+		if err != nil {
+			return err
+		}
+		if !gone {
+			return fail("recorded process is absent but its utun or UAPI socket remains")
+		}
+		return removeState(value.directory)
 	}
 	process, err := os.FindProcess(value.pid)
 	if err != nil {
@@ -412,6 +487,9 @@ func stop(value state) error {
 			return err
 		}
 	}
+	if err := waitForDeviceGone(value.name); err != nil {
+		return err
+	}
 	return removeState(value.directory)
 }
 
@@ -419,11 +497,25 @@ func selfCheck() error {
 	if !utunName.MatchString("utun12") || utunName.MatchString("utun12.sock") {
 		return fail("utun-name validation failed")
 	}
+	if err := validateNewUtun("utun12", map[string]bool{"utun12": true}); err == nil {
+		return fail("baseline utun was accepted")
+	}
 	if err := safeStatePathForCheck("/var/run/" + statePrefix + "abc"); err != nil {
 		return err
 	}
 	if err := safeStatePathForCheck("/var/run/" + statePrefix + "../escape"); err == nil {
 		return fail("state path traversal was accepted")
+	}
+	if err := validateBackendPath("/usr/local/libexec/amneziawg-go-helper-poc"); err != nil {
+		return err
+	}
+	if err := validateBackendPath("/usr/local/libexec/../escape"); err == nil {
+		return fail("backend path traversal was accepted")
+	}
+	if runtime.GOOS == "darwin" {
+		if err := validateBackend("/usr/bin/true"); err != nil {
+			return err
+		}
 	}
 	if err := parseUAPIReplyForCheck("public_key=synthetic\nerrno=0\n\n"); err != nil {
 		return err

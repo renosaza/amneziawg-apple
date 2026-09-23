@@ -27,11 +27,12 @@ kernel-assigned interface, and later stops only the recorded process. It
 accepts no WireGuard or AmneziaWG profile and therefore cannot receive a user
 key, peer, address, route, DNS value, or PF rule.
 
-The helper accepts only an absolute, root-owned, non-writable executable. Its
-state directory and metadata files are root-owned and use `0700`/`0600`
-permissions. Stop verifies PID start time and command before signalling; it
-never removes a UAPI socket itself. Start refuses any host that already has a
-`utun` interface.
+The helper accepts only an absolute executable whose file and every ancestor
+directory are root-owned, non-writable, and not symlinks. Its state directory
+and metadata files are root-owned and use `0700`/`0600` permissions. Stop
+verifies PID start time and command before signalling; it never removes a UAPI
+socket itself. It records baseline `utun` interfaces and rejects a backend
+that reports one of them.
 
 ## Consequences
 
@@ -40,3 +41,7 @@ store, or a routing daemon. It does not alter the production NetworkExtension
 path. A future production proposal requires explicit approval, a reviewed IPC
 authentication design, configuration validation, routing/DNS ownership,
 installer design, and real runtime validation.
+
+The PID identity check uses `ps lstart`, whose timestamp has finite granularity.
+That is accepted only for this root-owned POC state directory; a production
+helper needs an authenticated lifecycle protocol instead.

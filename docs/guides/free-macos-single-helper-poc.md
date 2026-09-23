@@ -13,8 +13,10 @@ process, queries its UAPI socket, and stops it. It accepts no VPN
 configuration, creates no peer, address, route, DNS, or PF state, and does
 not connect to the application GUI.
 
-Run it only on an idle disposable Mac. The helper refuses to start when any
-`utun` exists, so it cannot run alongside a real VPN.
+Run it only on an idle disposable Mac. The helper records existing `utun`
+interfaces and only accepts a newly assigned name; it does not modify the
+baseline interfaces. This is still not a runtime test to perform beside a
+real VPN.
 
 ```sh
 mkdir -p out
