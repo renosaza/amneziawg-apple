@@ -24,10 +24,13 @@ for configuration in ('7A0000162F00000100000001', '7A0000172F00000100000001'):
 PY
 
 if grep -Eq 'NETunnelProviderManager|sendProviderMessage|DaemonControlClient.*\.start|DaemonControlClient.*\.stop' "$manager"; then
-    echo 'daemon GUI manager must remain read-only' >&2
+    echo 'daemon GUI manager must not use Network Extension or daemon lifecycle' >&2
     exit 1
 fi
 grep -Eq 'DaemonControlClient\(socketPath: controlSocketPath\)\.list\(\)' "$manager"
 grep -Eq -- '--daemon-self-check' "$repo_dir/Sources/WireGuardApp/UI/macOS/AppDelegate.swift"
+grep -Eq 'store\.save\(' "$manager"
+grep -Eq 'store\.delete\(' "$manager"
+grep -Eq 'guard tunnel\.status == \.inactive else' "$manager"
 
 echo "unsigned daemon GUI target self-check passed"

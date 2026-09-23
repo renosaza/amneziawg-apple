@@ -39,6 +39,24 @@ final class DaemonProfileStoreTests: XCTestCase {
         XCTAssertNil(fixture.secrets.pendingValue(for: id))
     }
 
+    func testSaveExistingIDKeepsIdentityAndReplacesConfiguration() throws {
+        let fixture = try Fixture()
+        let id = UUID()
+        let original = Self.configuration()
+        let replacement = Self.configuration(excludeIPs: true)
+
+        try fixture.store.save(id: id, name: "Original", wgQuickConfig: original)
+        try fixture.store.save(id: id, name: "Renamed", wgQuickConfig: replacement)
+
+        XCTAssertEqual(try fixture.store.profiles(), [DaemonProfileMetadata(id: id, name: "Renamed")])
+        XCTAssertEqual(try fixture.store.configuration(for: id).name, "Renamed")
+        XCTAssertEqual(
+            try fixture.store.configuration(for: id).peers[0].excludeIPs.map(\.stringRepresentation),
+            ["192.0.2.0/24", "2001:db8::/32"]
+        )
+        XCTAssertEqual(fixture.secrets.activeValue(for: id), Data(replacement.utf8))
+    }
+
     func testDeleteKeychainFailureRecoversOnNextCall() throws {
         let fixture = try Fixture()
         let id = UUID()
