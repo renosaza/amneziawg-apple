@@ -230,7 +230,11 @@ func validConfig(config string) error {
 	if config == "" || len(config) > maxConfigBytes || strings.ContainsAny(config, "\x00\r") {
 		return errors.New("invalid UAPI config size")
 	}
-	for _, line := range strings.Split(config, "\n") {
+	lines := strings.Split(config, "\n")
+	if lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	for _, line := range lines {
 		key, value, found := strings.Cut(line, "=")
 		if !found || key == "" || value == "" || key == "set" || key == "get" || key == "errno" {
 			return errors.New("invalid UAPI config field")
