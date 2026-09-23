@@ -44,6 +44,22 @@ func TestManualSyntheticThreeTunnelLifecycle(t *testing.T) {
 			t.Fatalf("status %s failed: %#v", profile.id, status)
 		}
 	}
+	process, ok := server.profiles[profileID].value.(*tunnelProcess)
+	if !ok {
+		t.Fatal("missing owned tunnel process")
+	}
+	configured, err := configureSyntheticIPv4Route(process, "192.0.2.2", "192.0.2.1", "192.0.2.10")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := configured.Close(); err != nil {
+			t.Errorf("route cleanup failed: %v", err)
+		}
+	})
+	if err := configured.verify(); err != nil {
+		t.Fatal(err)
+	}
 	if stopped := server.apply(request{Operation: "stop", ProfileID: profileIDTwo}); !stopped.OK {
 		t.Fatalf("stop middle tunnel failed: %#v", stopped)
 	}

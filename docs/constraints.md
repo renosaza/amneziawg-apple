@@ -4,6 +4,7 @@ active_ids:
   - C-DAEMON-EXPERIMENT
   - C-DAEMON-IPC-EXPERIMENT
   - C-DAEMON-THREE-SESSION-EXPERIMENT
+  - C-DAEMON-IPV4-ROUTE-EXPERIMENT
 ---
 
 # Constraints
@@ -13,6 +14,7 @@ active_ids:
 - `C-DAEMON-EXPERIMENT`: Decision 0003 establishes the root-only synthetic-helper boundary. It is not a production routing daemon, installer, or GUI backend; configuration scope is controlled by the later specific daemon constraints.
 - `C-DAEMON-IPC-EXPERIMENT`: Decision 0004 establishes the root-created, UID-authenticated Unix-socket control boundary and in-memory UUID state. It does not itself authorize a VPN backend, profile persistence, routes, DNS, or PF state.
 - `C-DAEMON-THREE-SESSION-EXPERIMENT`: Decision 0006 permits up to three independent root-owned, in-memory UAPI-configured `utun` children only for manual disposable-runner tests with synthetic keys. It may not persist configurations or alter routes, addresses, DNS, PF, GUI, installer, or automatic startup.
+- `C-DAEMON-IPV4-ROUTE-EXPERIMENT`: Decision 0007 permits one TEST-NET IPv4 address pair and one exact TEST-NET `/32` route owned by one synthetic daemon `utun`, only in a manual disposable-runner test. It may not alter physical routes, IPv6, DNS, GUI, persistence, or automatic startup.
 - Do not alter the AmneziaWG protocol or `amneziawg-go` for macOS UI multi-tunnel support.
 - Keep macOS multi-tunnel changes separate from iOS single-tunnel behavior.
 - A full route may coexist with a more-specific split route. Reject duplicate or ambiguous ownership within the same IP family before activation.
