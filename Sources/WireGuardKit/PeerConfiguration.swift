@@ -25,6 +25,7 @@ extension PeerConfiguration: Equatable {
         return lhs.publicKey == rhs.publicKey &&
             lhs.preSharedKey == rhs.preSharedKey &&
             Set(lhs.allowedIPs) == Set(rhs.allowedIPs) &&
+            Set(lhs.excludeIPs) == Set(rhs.excludeIPs) &&
             lhs.endpoint == rhs.endpoint &&
             lhs.persistentKeepAlive == rhs.persistentKeepAlive
     }
@@ -35,8 +36,8 @@ extension PeerConfiguration: Hashable {
         hasher.combine(publicKey)
         hasher.combine(preSharedKey)
         hasher.combine(Set(allowedIPs))
+        hasher.combine(Set(excludeIPs))
         hasher.combine(endpoint)
         hasher.combine(persistentKeepAlive)
-
     }
 }

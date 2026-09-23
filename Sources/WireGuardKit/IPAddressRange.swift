@@ -56,8 +56,8 @@ extension IPAddressRange {
             let indexOfNetworkPrefixLength = string.index(after: endOfIPAddress)
             guard indexOfNetworkPrefixLength < string.endIndex else { return nil }
             let networkPrefixLengthSubstring = string[indexOfNetworkPrefixLength ..< string.endIndex]
-            guard let npl = UInt8(networkPrefixLengthSubstring) else { return nil }
-            networkPrefixLength = min(npl, maxNetworkPrefixLength)
+            guard let npl = UInt8(networkPrefixLengthSubstring), npl <= maxNetworkPrefixLength else { return nil }
+            networkPrefixLength = npl
         } else {
             networkPrefixLength = maxNetworkPrefixLength
         }
