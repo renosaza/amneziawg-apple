@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestManualSyntheticTunnelLifecycle(t *testing.T) {
+func TestManualSyntheticThreeTunnelLifecycle(t *testing.T) {
 	if os.Getenv("AMNEZIAWG_DAEMON_RUNTIME") != "1" {
 		t.Skip("manual disposable-runner test")
 	}
@@ -21,23 +21,35 @@ func TestManualSyntheticTunnelLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	started := server.apply(request{Operation: "start", ProfileID: profileID, Config: "private_key=0101010101010101010101010101010101010101010101010101010101010101"})
-	if !started.OK {
-		t.Fatalf("start failed: %#v", started)
-	}
-	stopped := false
 	t.Cleanup(func() {
-		if !stopped {
-			if response := server.apply(request{Operation: "stop", ProfileID: profileID}); !response.OK {
-				t.Errorf("cleanup failed: %#v", response)
-			}
+		if err := server.Close(); err != nil {
+			t.Errorf("cleanup failed: %v", err)
 		}
 	})
-	if status := server.apply(request{Operation: "status", ProfileID: profileID}); !status.OK {
-		t.Fatalf("status failed: %#v", status)
+	profiles := []struct {
+		id     string
+		config string
+	}{
+		{profileID, "private_key=0101010101010101010101010101010101010101010101010101010101010101"},
+		{profileIDTwo, "private_key=0202020202020202020202020202020202020202020202020202020202020202"},
+		{profileIDThree, "private_key=0303030303030303030303030303030303030303030303030303030303030303"},
 	}
-	if stopped := server.apply(request{Operation: "stop", ProfileID: profileID}); !stopped.OK {
-		t.Fatalf("stop failed: %#v", stopped)
+	for _, profile := range profiles {
+		if started := server.apply(request{Operation: "start", ProfileID: profile.id, Config: profile.config}); !started.OK {
+			t.Fatalf("start %s failed: %#v", profile.id, started)
+		}
 	}
-	stopped = true
+	for _, profile := range profiles {
+		if status := server.apply(request{Operation: "status", ProfileID: profile.id}); !status.OK {
+			t.Fatalf("status %s failed: %#v", profile.id, status)
+		}
+	}
+	if stopped := server.apply(request{Operation: "stop", ProfileID: profileIDTwo}); !stopped.OK {
+		t.Fatalf("stop middle tunnel failed: %#v", stopped)
+	}
+	for _, profile := range []struct{ id string }{{profileID}, {profileIDThree}} {
+		if status := server.apply(request{Operation: "status", ProfileID: profile.id}); !status.OK {
+			t.Fatalf("remaining status %s failed: %#v", profile.id, status)
+		}
+	}
 }

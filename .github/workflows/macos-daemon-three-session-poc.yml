@@ -1,4 +1,4 @@
-name: macOS single-profile daemon POC
+name: macOS three-session daemon POC
 
 on:
   workflow_dispatch:
@@ -16,12 +16,12 @@ jobs:
         with:
           go-version-file: scripts/daemon-control/go.mod
           cache-dependency-path: scripts/daemon-control/go.sum
-      - name: Run one synthetic child lifecycle on the disposable runner
+      - name: Run three synthetic child lifecycles on the disposable runner
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p out
           go build -C Sources/WireGuardKitGo -o ../../out/amneziawg-go github.com/amnezia-vpn/amneziawg-go/v3
           sudo install -d -o root -g wheel -m 0755 /usr/local/libexec
-          sudo install -o root -g wheel -m 0755 out/amneziawg-go /usr/local/libexec/amneziawg-go-daemon-single-poc
-          sudo env AMNEZIAWG_DAEMON_RUNTIME=1 AMNEZIAWG_DAEMON_BINARY=/usr/local/libexec/amneziawg-go-daemon-single-poc go test -C scripts/daemon-control -tags manualruntime -run TestManualSyntheticTunnelLifecycle -count=1
+          sudo install -o root -g wheel -m 0755 out/amneziawg-go /usr/local/libexec/amneziawg-go-daemon-three-poc
+          sudo env AMNEZIAWG_DAEMON_RUNTIME=1 AMNEZIAWG_DAEMON_BINARY=/usr/local/libexec/amneziawg-go-daemon-three-poc go test -C scripts/daemon-control -tags manualruntime -run TestManualSyntheticThreeTunnelLifecycle -count=1

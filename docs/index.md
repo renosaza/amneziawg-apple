@@ -7,6 +7,7 @@
 - [Decision 0003](architecture/decisions/0003-free-macos-single-helper-prototype.md): root-only single-`utun` helper prototype.
 - [Decision 0004](architecture/decisions/0004-free-macos-daemon-control-poc.md): authenticated fake daemon-control boundary.
 - [Decision 0005](architecture/decisions/0005-free-macos-single-profile-daemon-poc.md): one-profile daemon lifecycle experiment.
+- [Decision 0006](architecture/decisions/0006-free-macos-three-session-daemon-poc.md): three-session daemon lifecycle experiment.
 - [Building](BUILDING.md): local macOS build and signing prerequisites.
 - [Local development](guides/local-development.md): verified development checks.
 - [Troubleshooting](guides/troubleshooting.md): verified local toolchain limitation.
