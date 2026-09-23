@@ -68,6 +68,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"sync/atomic"
 	"syscall"
 	"unsafe"
 
@@ -83,23 +84,25 @@ type IPv4Route struct {
 	addressSet, routeSet bool
 }
 
-func ConfigureSyntheticIPv4Route(name, localText, peerText, targetText string) (*IPv4Route, error) {
-	if os.Geteuid() != 0 || !utunName.MatchString(name) {
+var routeSequence atomic.Uint32
+
+func configureSyntheticIPv4Route(process *tunnelProcess, localText, peerText, targetText string) (*IPv4Route, error) {
+	if process == nil || os.Geteuid() != 0 || !utunName.MatchString(process.name) {
 		return nil, errors.New("synthetic IPv4 route requires root and a utun")
 	}
 	local, peer, target, err := ipv4(localText, peerText, targetText)
 	if err != nil {
 		return nil, err
 	}
-	iface, err := net.InterfaceByName(name)
+	iface, err := net.InterfaceByName(process.name)
 	if err != nil {
 		return nil, err
 	}
-	configured := &IPv4Route{name: name, local: local.String(), target: target, iface: iface}
+	configured := &IPv4Route{name: process.name, local: local.String(), target: target, iface: iface}
 	if existing, err := configured.request(syscall.RTM_GET); err == nil && existing.Err == nil {
 		return nil, errors.New("refusing to replace an existing route")
 	}
-	cName, cLocal, cPeer := C.CString(name), C.CString(local.String()), C.CString(peer.String())
+	cName, cLocal, cPeer := C.CString(process.name), C.CString(local.String()), C.CString(peer.String())
 	defer C.free(unsafe.Pointer(cName))
 	defer C.free(unsafe.Pointer(cLocal))
 	defer C.free(unsafe.Pointer(cPeer))
@@ -188,7 +191,8 @@ func (configured *IPv4Route) request(kind int) (*route.RouteMessage, error) {
 		return nil, err
 	}
 	defer unix.Close(fd)
-	message := &route.RouteMessage{Version: syscall.RTM_VERSION, Type: kind, Flags: syscall.RTF_UP | syscall.RTF_HOST | syscall.RTF_STATIC, ID: uintptr(os.Getpid()), Seq: 1, Addrs: []route.Addr{
+	sequence := int(routeSequence.Add(1))
+	message := &route.RouteMessage{Version: syscall.RTM_VERSION, Type: kind, Flags: syscall.RTF_UP | syscall.RTF_HOST | syscall.RTF_STATIC, ID: uintptr(os.Getpid()), Seq: sequence, Addrs: []route.Addr{
 		&route.Inet4Addr{IP: configured.target.As4()},
 		&route.LinkAddr{Index: configured.iface.Index, Name: configured.name},
 		&route.Inet4Addr{IP: [4]byte{255, 255, 255, 255}},
@@ -210,8 +214,15 @@ func (configured *IPv4Route) request(kind int) (*route.RouteMessage, error) {
 		return nil, fmt.Errorf("invalid route reply: %w", err)
 	}
 	result, ok := messages[0].(*route.RouteMessage)
-	if !ok || result.ID != uintptr(os.Getpid()) {
+	if !ok || result.ID != uintptr(os.Getpid()) || result.Seq != sequence || result.Type != kind || !configured.matches(result) {
 		return nil, errors.New("unexpected route reply")
 	}
 	return result, nil
+}
+
+func (configured *IPv4Route) matches(message *route.RouteMessage) bool {
+	destination, destinationOK := message.Addrs[syscall.RTAX_DST].(*route.Inet4Addr)
+	mask, maskOK := message.Addrs[syscall.RTAX_NETMASK].(*route.Inet4Addr)
+	link, linkOK := message.Addrs[syscall.RTAX_IFP].(*route.LinkAddr)
+	return destinationOK && maskOK && linkOK && destination.IP == configured.target.As4() && mask.IP == [4]byte{255, 255, 255, 255} && link.Index == configured.iface.Index
 }

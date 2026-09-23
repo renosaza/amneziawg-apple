@@ -48,7 +48,7 @@ func TestManualSyntheticThreeTunnelLifecycle(t *testing.T) {
 	if !ok {
 		t.Fatal("missing owned tunnel process")
 	}
-	configured, err := ConfigureSyntheticIPv4Route(process.name, "192.0.2.2", "192.0.2.1", "192.0.2.10")
+	configured, err := configureSyntheticIPv4Route(process, "192.0.2.2", "192.0.2.1", "192.0.2.10")
 	if err != nil {
 		t.Fatal(err)
 	}
