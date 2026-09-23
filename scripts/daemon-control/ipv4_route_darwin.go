@@ -77,9 +77,10 @@ import (
 
 // IPv4Route owns one synthetic address and one /32 route on one utun.
 type IPv4Route struct {
-	name, local string
-	target      netip.Addr
-	iface       *net.Interface
+	name, local          string
+	target               netip.Addr
+	iface                *net.Interface
+	addressSet, routeSet bool
 }
 
 func ConfigureSyntheticIPv4Route(name, localText, peerText, targetText string) (*IPv4Route, error) {
@@ -94,6 +95,10 @@ func ConfigureSyntheticIPv4Route(name, localText, peerText, targetText string) (
 	if err != nil {
 		return nil, err
 	}
+	configured := &IPv4Route{name: name, local: local.String(), target: target, iface: iface}
+	if existing, err := configured.request(syscall.RTM_GET); err == nil && existing.Err == nil {
+		return nil, errors.New("refusing to replace an existing route")
+	}
 	cName, cLocal, cPeer := C.CString(name), C.CString(local.String()), C.CString(peer.String())
 	defer C.free(unsafe.Pointer(cName))
 	defer C.free(unsafe.Pointer(cLocal))
@@ -101,7 +106,7 @@ func ConfigureSyntheticIPv4Route(name, localText, peerText, targetText string) (
 	if C.set_address(cName, cLocal, cPeer) != 0 {
 		return nil, errors.New("set synthetic IPv4 address")
 	}
-	configured := &IPv4Route{name: name, local: local.String(), target: target, iface: iface}
+	configured.addressSet = true
 	if err := configured.add(); err != nil {
 		return nil, errors.Join(err, configured.removeAddress())
 	}
@@ -129,7 +134,18 @@ func ipv4(values ...string) (netip.Addr, netip.Addr, netip.Addr, error) {
 func (configured *IPv4Route) add() error { return configured.write(syscall.RTM_ADD) }
 
 func (configured *IPv4Route) Close() error {
-	return errors.Join(configured.write(syscall.RTM_DELETE), configured.removeAddress())
+	var problems []error
+	if configured.routeSet {
+		if err := configured.verify(); err != nil {
+			problems = append(problems, err)
+		} else if err := configured.write(syscall.RTM_DELETE); err != nil {
+			problems = append(problems, err)
+		}
+	}
+	if configured.addressSet {
+		problems = append(problems, configured.removeAddress())
+	}
+	return errors.Join(problems...)
 }
 
 func (configured *IPv4Route) removeAddress() error {
@@ -139,6 +155,7 @@ func (configured *IPv4Route) removeAddress() error {
 	if C.delete_address(cName, cLocal) != 0 {
 		return errors.New("delete synthetic IPv4 address")
 	}
+	configured.addressSet = false
 	return nil
 }
 
@@ -158,6 +175,9 @@ func (configured *IPv4Route) write(kind int) error {
 	message, err := configured.request(kind)
 	if err != nil {
 		return err
+	}
+	if message.Err == nil && kind == syscall.RTM_ADD {
+		configured.routeSet = true
 	}
 	return message.Err
 }
