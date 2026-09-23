@@ -60,7 +60,7 @@ final class RouteOwnershipValidatorTests: XCTestCase {
 
     func testRejectsSplitTunnelWhenActiveFullTunnelMissesItsStaticEndpoint() {
         let error = RouteOwnershipValidator.validationError(
-            activating: "CM", configuration(allowed: ["10.25.0.0/24"], endpoint: "192.0.2.10:51820"),
+            activating: "CM", configuration: configuration(allowed: ["10.25.0.0/24"], endpoint: "192.0.2.10:51820"),
             against: [("sticky", configuration(allowed: ["0.0.0.0/0"]))])
 
         XCTAssertEqual(error, .missingEndpointExclusion(tunnelName: "sticky", endpoint: "192.0.2.10/32"))
@@ -79,7 +79,7 @@ final class RouteOwnershipValidatorTests: XCTestCase {
 
     func testRejectsHostnameEndpointWhenFullTunnelIsAlreadyActive() {
         let error = RouteOwnershipValidator.validationError(
-            activating: "CM", configuration(allowed: ["10.25.0.0/24"], endpoint: "vpn.example.test:51820"),
+            activating: "CM", configuration: configuration(allowed: ["10.25.0.0/24"], endpoint: "vpn.example.test:51820"),
             against: [("sticky", configuration(allowed: ["0.0.0.0/0"]))])
 
         XCTAssertEqual(

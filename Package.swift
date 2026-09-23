@@ -16,7 +16,14 @@ let package = Package(
     targets: [
         .target(
             name: "WireGuardKit",
-            dependencies: ["WireGuardKitGo", "WireGuardKitC"]
+            dependencies: ["WireGuardKitGo", "WireGuardKitC"],
+            path: "Sources",
+            exclude: ["WireGuardApp", "WireGuardNetworkExtension"],
+            sources: [
+                "WireGuardKit",
+                "Shared/Model/String+ArrayConversion.swift",
+                "Shared/Model/TunnelConfiguration+WgQuickConfig.swift"
+            ]
         ),
         .target(
             name: "WireGuardKitC",
