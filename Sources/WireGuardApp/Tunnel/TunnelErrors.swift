@@ -32,6 +32,8 @@ enum TunnelsManagerError: WireGuardAppError {
 
 enum TunnelsManagerActivationAttemptError: WireGuardAppError {
     case tunnelIsNotInactive
+    case routeConflict(tunnelName: String, route: String, ownerName: String)
+    case missingEndpointExclusion(tunnelName: String, endpoint: String)
     case failedWhileStarting(systemError: Error) // startTunnel() throwed
     case failedWhileSaving(systemError: Error) // save config after re-enabling throwed
     case failedWhileLoading(systemError: Error) // reloading config throwed
@@ -41,6 +43,10 @@ enum TunnelsManagerActivationAttemptError: WireGuardAppError {
         switch self {
         case .tunnelIsNotInactive:
             return (tr("alertTunnelActivationErrorTunnelIsNotInactiveTitle"), tr("alertTunnelActivationErrorTunnelIsNotInactiveMessage"))
+        case .routeConflict(let tunnelName, let route, let ownerName):
+            return ("Cannot activate \"\(tunnelName)\".", "Route conflict:\n\(route) is already handled by \"\(ownerName)\".")
+        case .missingEndpointExclusion(let tunnelName, let endpoint):
+            return ("Cannot activate tunnel.", "Full tunnel \"\(tunnelName)\" must exclude VPN endpoint \(endpoint).")
         case .failedWhileStarting(let systemError),
              .failedWhileSaving(let systemError),
              .failedWhileLoading(let systemError),
