@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/renosaza/amneziawg-daemon-control-poc"
 )
@@ -17,9 +18,10 @@ import (
 func main() {
 	socket := flag.String("socket", "", "root-owned directory socket path")
 	uidText := flag.String("uid", "", "authorized non-root macOS UID")
+	binary := flag.String("binary", "", "trusted absolute amneziawg-go path")
 	flag.Parse()
-	if flag.NArg() != 0 || *socket == "" || *uidText == "" {
-		fmt.Fprintln(os.Stderr, "usage: daemon-control-poc -socket /var/run/name.sock -uid <macOS-uid>")
+	if flag.NArg() != 0 || *socket == "" || *uidText == "" || *binary == "" {
+		fmt.Fprintln(os.Stderr, "usage: daemon-control-poc -socket /var/run/name.sock -uid <macOS-uid> -binary /root-owned/amneziawg-go")
 		os.Exit(2)
 	}
 	uid, err := parseUID(*uidText)
@@ -27,7 +29,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	server, err := daemoncontrol.NewServer(uid)
+	backend, err := daemoncontrol.NewTunnelBackend(*binary)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	server, err := daemoncontrol.NewServerWithBackend(uid, backend)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -46,8 +53,26 @@ func main() {
 	}()
 	if err := server.Serve(listener); err != nil {
 		fmt.Fprintln(os.Stderr, err)
+		if cleanupErr := cleanup(server); cleanupErr != nil {
+			fmt.Fprintln(os.Stderr, "daemon cleanup failed after retries")
+		}
 		os.Exit(1)
 	}
+	if err := cleanup(server); err != nil {
+		fmt.Fprintln(os.Stderr, "daemon cleanup failed after retries")
+		os.Exit(1)
+	}
+}
+
+func cleanup(server *daemoncontrol.Server) error {
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		if err = server.Close(); err == nil {
+			return nil
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return err
 }
 
 func parseUID(value string) (uint32, error) {

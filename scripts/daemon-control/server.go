@@ -23,9 +23,10 @@ import (
 
 const (
 	maxFrameBytes  = 4 * 1024
-	maxProfiles    = 48
+	maxProfiles    = 1
 	maxConnections = 16
 	maxSocketPath  = 103 // Darwin sun_path has room for a trailing NUL.
+	maxConfigBytes = 2 * 1024
 )
 
 var umaskMu sync.Mutex
@@ -34,6 +35,7 @@ type request struct {
 	Version   int    `json:"version"`
 	Operation string `json:"operation"`
 	ProfileID string `json:"profile_id,omitempty"`
+	Config    string `json:"config,omitempty"`
 }
 
 type Profile struct {
@@ -52,17 +54,28 @@ type response struct {
 type Server struct {
 	allowedUID  uint32
 	mu          sync.Mutex
-	profiles    map[string]struct{}
+	profiles    map[string]Session
+	backend     Backend
 	connections chan struct{}
+	closed      bool
+	closeMu     sync.Mutex
 }
 
 func NewServer(allowedUID uint32) (*Server, error) {
+	return NewServerWithBackend(allowedUID, memoryBackend{})
+}
+
+func NewServerWithBackend(allowedUID uint32, backend Backend) (*Server, error) {
 	if allowedUID == 0 {
 		return nil, errors.New("allowed UID must be a non-root user")
 	}
+	if backend == nil {
+		return nil, errors.New("backend is required")
+	}
 	return &Server{
 		allowedUID:  allowedUID,
-		profiles:    make(map[string]struct{}),
+		profiles:    make(map[string]Session),
+		backend:     backend,
 		connections: make(chan struct{}, maxConnections),
 	}, nil
 }
@@ -99,37 +112,81 @@ func (server *Server) serve(connection io.ReadWriter, uid uint32) {
 func (server *Server) apply(request request) response {
 	server.mu.Lock()
 	defer server.mu.Unlock()
+	if server.closed {
+		return response{Error: "shutting_down"}
+	}
 
 	switch request.Operation {
 	case "list":
 		profiles := make([]Profile, 0, len(server.profiles))
-		for id := range server.profiles {
+		for id, session := range server.profiles {
+			if server.backend.Status(session) != nil {
+				profiles = append(profiles, Profile{ID: id, Status: "degraded"})
+				continue
+			}
 			profiles = append(profiles, Profile{ID: id, Status: "running"})
 		}
 		sort.Slice(profiles, func(i, j int) bool { return profiles[i].ID < profiles[j].ID })
 		return response{OK: true, Profiles: profiles}
 	case "start":
-		if _, found := server.profiles[request.ProfileID]; !found {
-			if len(server.profiles) == maxProfiles {
-				return response{Error: "capacity"}
-			}
-			server.profiles[request.ProfileID] = struct{}{}
+		if _, found := server.profiles[request.ProfileID]; found {
+			return response{Error: "already_running"}
 		}
+		if len(server.profiles) == maxProfiles {
+			return response{Error: "capacity"}
+		}
+		session, err := server.backend.Start(request.Config)
+		if err != nil {
+			return response{Error: "start_failed"}
+		}
+		server.profiles[request.ProfileID] = session
 		return response{OK: true, Profile: &Profile{ID: request.ProfileID, Status: "running"}}
 	case "stop":
-		if _, found := server.profiles[request.ProfileID]; !found {
+		session, found := server.profiles[request.ProfileID]
+		if !found {
 			return response{Error: "not_found"}
+		}
+		if err := server.backend.Stop(session); err != nil {
+			return response{Error: "stop_failed"}
 		}
 		delete(server.profiles, request.ProfileID)
 		return response{OK: true, Profile: &Profile{ID: request.ProfileID, Status: "stopped"}}
 	case "status":
-		if _, found := server.profiles[request.ProfileID]; !found {
+		session, found := server.profiles[request.ProfileID]
+		if !found {
 			return response{Error: "not_found"}
+		}
+		if err := server.backend.Status(session); err != nil {
+			return response{Error: "status_failed"}
 		}
 		return response{OK: true, Profile: &Profile{ID: request.ProfileID, Status: "running"}}
 	default:
 		return response{Error: "invalid_request"}
 	}
+}
+
+// Close prevents new operations and stops every child owned by this server.
+func (server *Server) Close() error {
+	server.closeMu.Lock()
+	defer server.closeMu.Unlock()
+	server.mu.Lock()
+	server.closed = true
+	sessions := make(map[string]Session, len(server.profiles))
+	for id, session := range server.profiles {
+		sessions[id] = session
+	}
+	server.mu.Unlock()
+	var problems []error
+	for id, session := range sessions {
+		if err := server.backend.Stop(session); err != nil {
+			problems = append(problems, err)
+			continue
+		}
+		server.mu.Lock()
+		delete(server.profiles, id)
+		server.mu.Unlock()
+	}
+	return errors.Join(problems...)
 }
 
 func decodeRequest(frame []byte) (request, error) {
@@ -147,18 +204,44 @@ func decodeRequest(frame []byte) (request, error) {
 	}
 	switch request.Operation {
 	case "list":
-		if request.ProfileID != "" {
+		if request.ProfileID != "" || request.Config != "" {
 			return request, errors.New("list does not accept a profile")
 		}
-	case "start", "stop", "status":
+	case "start":
 		request.ProfileID = strings.ToLower(request.ProfileID)
 		if !validUUID(request.ProfileID) {
 			return request, errors.New("profile ID must be a UUID")
+		}
+		if err := validConfig(request.Config); err != nil {
+			return request, err
+		}
+	case "stop", "status":
+		request.ProfileID = strings.ToLower(request.ProfileID)
+		if !validUUID(request.ProfileID) || request.Config != "" {
+			return request, errors.New("invalid profile operation")
 		}
 	default:
 		return request, errors.New("unsupported operation")
 	}
 	return request, nil
+}
+
+func validConfig(config string) error {
+	if config == "" || len(config) > maxConfigBytes || strings.ContainsAny(config, "\x00\r") {
+		return errors.New("invalid UAPI config size")
+	}
+	for _, line := range strings.Split(config, "\n") {
+		key, value, found := strings.Cut(line, "=")
+		if !found || key == "" || value == "" || key == "set" || key == "get" || key == "errno" {
+			return errors.New("invalid UAPI config field")
+		}
+		for _, character := range key {
+			if !((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9') || character == '_') {
+				return errors.New("invalid UAPI config key")
+			}
+		}
+	}
+	return nil
 }
 
 func validUUID(value string) bool {
