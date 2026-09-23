@@ -29,10 +29,18 @@ UUID in an ordinary login Keychain generic-password item. The item uses a
 fixed service name and no NetworkExtension access-group or trusted-application
 ACL.
 
-Save and delete restore the previous Keychain value if their metadata commit
-fails. Rename changes metadata only. The store does not log configuration
-text or key material. Its automated test injects an in-memory secret store
-and uses generated synthetic keys.
+Save stages a versioned pending Keychain item before committing metadata, then
+promotes it to the UUID's active item. A `0600` non-secret journal completes or
+rolls back an interrupted operation under an advisory file lock; a later store
+call recovers an interrupted transaction without guessing at secret content.
+Failures before a metadata commit restore the previous state. After a metadata
+commit, the journal completes the operation on a later call instead of trying
+to guess whether a Keychain mutation reached durable storage. Rename changes
+metadata only. Metadata and journal reads use `O_NOFOLLOW` descriptors and
+validate the opened inode's owner and mode. The store does not log
+configuration text or key material. Its automated tests inject an in-memory
+secret store, exercise recovery and `ExcludeIPs`, and use a unique-service
+login-Keychain item with cleanup.
 
 ## Consequences
 
