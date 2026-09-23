@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: macos-latest
+    env:
+      # Verified in WireGuard.xcodeproj: the macOS application target embeds its extension.
+      MACOS_APP_TARGET: WireGuardmacOS
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Verify the selected macOS application target
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -list -project WireGuard.xcodeproj -json | tee /tmp/xcode-project.json
+          plutil -extract project.targets json -o - /tmp/xcode-project.json | grep -Fq "\"${MACOS_APP_TARGET}\""
+      - name: Build Go bridge
+        run: make -C Sources/WireGuardKitGo
+      - name: Compile macOS target without signing
+        run: xcodebuild -project WireGuard.xcodeproj -target "$MACOS_APP_TARGET" -configuration Debug -sdk macosx CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+      - name: Run all SwiftPM WireGuardKit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          swift test list | tee /tmp/swiftpm-tests.txt
+          grep -Fq 'ExcludeIPsTests.' /tmp/swiftpm-tests.txt
+          grep -Fq 'RouteOwnershipValidatorTests.' /tmp/swiftpm-tests.txt
+          grep -Fq 'NetworkChangeEndpointTests.' /tmp/swiftpm-tests.txt
+          swift test
