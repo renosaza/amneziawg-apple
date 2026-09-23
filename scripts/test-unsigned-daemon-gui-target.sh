@@ -23,10 +23,10 @@ for configuration in ('7A0000162F00000100000001', '7A0000172F00000100000001'):
     assert 'DAEMON_MODE' in block
 PY
 
-if rg -q 'NETunnelProviderManager|sendProviderMessage|DaemonControlClient.*\.start|DaemonControlClient.*\.stop' "$manager"; then
+if grep -Eq 'NETunnelProviderManager|sendProviderMessage|DaemonControlClient.*\.start|DaemonControlClient.*\.stop' "$manager"; then
     echo 'daemon GUI manager must remain read-only' >&2
     exit 1
 fi
-rg -q 'DaemonControlClient\(socketPath: controlSocketPath\)\.list\(\)' "$manager"
+grep -Eq 'DaemonControlClient\(socketPath: controlSocketPath\)\.list\(\)' "$manager"
 
 echo "unsigned daemon GUI target self-check passed"
