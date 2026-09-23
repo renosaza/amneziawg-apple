@@ -134,6 +134,9 @@ final class DaemonProfileStore {
             } else {
                 newDocument.profiles.append(DaemonProfileMetadata(id: id, name: validName))
             }
+            guard try secrets.read(id, .pending) == nil else {
+                throw DaemonProfileStoreError.metadataCorrupt
+            }
             let transaction = Transaction(operation: .save, phase: .prepared, id: id, name: validName)
             try writeJournal(transaction)
             var metadataCommitted = false
