@@ -74,7 +74,7 @@ func syntheticEndpoint(text string) (netip.Addr, error) {
 
 func syntheticEndpointInPrefix(text string, prefix netip.Prefix) (netip.Addr, error) {
 	target, err := netip.ParseAddr(text)
-	if err != nil || !target.Is4() || !prefix.Contains(target) {
+	if err != nil || !target.Is4() || (prefix != syntheticEndpointPrefix && prefix != syntheticPrecedencePrefix) || !prefix.Contains(target) {
 		return netip.Addr{}, errors.New("synthetic endpoint must be allowed TEST-NET IPv4")
 	}
 	return target, nil
