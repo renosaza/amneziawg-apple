@@ -10,6 +10,7 @@
 - [Decision 0006](architecture/decisions/0006-free-macos-three-session-daemon-poc.md): three-session daemon lifecycle experiment.
 - [Decision 0007](architecture/decisions/0007-free-macos-ipv4-route-poc.md): native synthetic IPv4 route experiment.
 - [Decision 0008](architecture/decisions/0008-free-macos-physical-endpoint-route-poc.md): synthetic physical endpoint-route experiment.
+- [Decision 0009](architecture/decisions/0009-free-macos-route-precedence-poc.md): synthetic fallback and specific-route precedence experiment.
 - [Building](BUILDING.md): local macOS build and signing prerequisites.
 - [Local development](guides/local-development.md): verified development checks.
 - [Troubleshooting](guides/troubleshooting.md): verified local toolchain limitation.

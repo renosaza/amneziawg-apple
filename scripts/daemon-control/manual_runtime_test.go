@@ -82,6 +82,40 @@ func TestManualSyntheticThreeTunnelLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("owned synthetic endpoint route target=%s gateway=%s interface=%s index=%d", endpointRoute.target, endpointRoute.gateway, endpointRoute.iface.Name, endpointRoute.iface.Index)
+	precedenceEndpoint, err := configureSyntheticPrecedenceEndpointRoute("198.51.100.10")
+	if precedenceEndpoint != nil {
+		t.Cleanup(func() {
+			if err := precedenceEndpoint.Close(); err != nil {
+				t.Errorf("precedence endpoint cleanup failed: %v", err)
+				return
+			}
+			t.Logf("removed synthetic precedence endpoint target=%s gateway=%s interface=%s index=%d", precedenceEndpoint.target, precedenceEndpoint.gateway, precedenceEndpoint.iface.Name, precedenceEndpoint.iface.Index)
+		})
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	fallbackRoute, err := configureSyntheticFallbackRoute(process)
+	if fallbackRoute != nil {
+		t.Cleanup(func() {
+			if err := fallbackRoute.Close(); err != nil {
+				t.Errorf("fallback route cleanup failed: %v", err)
+				return
+			}
+			t.Logf("removed synthetic fallback prefix=%s interface=%s index=%d", fallbackRoute.prefix, fallbackRoute.name, fallbackRoute.iface.Index)
+		})
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fallbackRoute.verify(); err != nil {
+		t.Fatal(err)
+	}
+	if err := precedenceEndpoint.verify(); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("owned synthetic fallback prefix=%s interface=%s index=%d", fallbackRoute.prefix, fallbackRoute.name, fallbackRoute.iface.Index)
+	t.Logf("owned synthetic precedence endpoint target=%s gateway=%s interface=%s index=%d", precedenceEndpoint.target, precedenceEndpoint.gateway, precedenceEndpoint.iface.Name, precedenceEndpoint.iface.Index)
 	if stopped := server.apply(request{Operation: "stop", ProfileID: profileIDTwo}); !stopped.OK {
 		t.Fatalf("stop middle tunnel failed: %#v", stopped)
 	}

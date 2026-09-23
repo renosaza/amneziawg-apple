@@ -6,6 +6,7 @@ active_ids:
   - C-DAEMON-THREE-SESSION-EXPERIMENT
   - C-DAEMON-IPV4-ROUTE-EXPERIMENT
   - C-DAEMON-ENDPOINT-ROUTE-EXPERIMENT
+  - C-DAEMON-PRECEDENCE-EXPERIMENT
 ---
 
 # Constraints
@@ -17,6 +18,7 @@ active_ids:
 - `C-DAEMON-THREE-SESSION-EXPERIMENT`: Decision 0006 permits up to three independent root-owned, in-memory UAPI-configured `utun` children only for manual disposable-runner tests with synthetic keys. It may not persist configurations or alter routes, addresses, DNS, PF, GUI, installer, or automatic startup.
 - `C-DAEMON-IPV4-ROUTE-EXPERIMENT`: Decision 0007 permits one TEST-NET IPv4 address pair and one exact TEST-NET `/32` route owned by one synthetic daemon `utun`, only in a manual disposable-runner test. It may not alter physical routes, IPv6, DNS, GUI, persistence, or automatic startup.
 - `C-DAEMON-ENDPOINT-ROUTE-EXPERIMENT`: Decision 0008 permits one `203.0.113.10/32` route through the current effective non-`utun` IPv4 gateway, only in a manual disposable-runner test. It must reject an existing exact host route and remove only a route that still matches its recorded target, gateway, and interface. It may not send traffic or configure real endpoints, DNS, GUI, persistent state, default routes, or `/1` routes.
+- `C-DAEMON-PRECEDENCE-EXPERIMENT`: Decision 0009 permits one synthetic `198.51.100.0/24` fallback route on an owned daemon `utun` and its more-specific `198.51.100.10/32` physical route, only in a manual disposable-runner test. It may not configure `0/0`, `/1`, DNS, GUI, persistence, traffic, real endpoints, or automatic startup. Each route must retain and verify its own owner before cleanup.
 - Do not alter the AmneziaWG protocol or `amneziawg-go` for macOS UI multi-tunnel support.
 - Keep macOS multi-tunnel changes separate from iOS single-tunnel behavior.
 - A full route may coexist with a more-specific split route. Reject duplicate or ambiguous ownership within the same IP family before activation.
