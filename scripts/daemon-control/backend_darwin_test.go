@@ -7,7 +7,8 @@ package daemoncontrol
 import "testing"
 
 func TestTunnelBackendDefaultsToNoSyntheticRoutes(t *testing.T) {
-	if (&tunnelBackend{}).syntheticIPv4Routes {
+	backend := &tunnelBackend{}
+	if backend.syntheticIPv4Routes || backend.syntheticEndpointRoutes {
 		t.Fatal("normal daemon backend enabled synthetic route binding")
 	}
 }
