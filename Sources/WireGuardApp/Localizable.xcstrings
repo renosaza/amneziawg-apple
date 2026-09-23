@@ -13609,6 +13609,17 @@
         }
       }
     },
+    "macAppStoreUpdatingAlertInfoWithOnDemandMultiple (%@)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Please disable on-demand for tunnels ‘%@’, deactivate all active tunnels, and then continue updating in App Store."
+          }
+        }
+      }
+    },
     "macAppStoreUpdatingAlertInfoWithoutOnDemand (%@)" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13682,6 +13693,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请禁用隧道 ”%@“ ，然后继续在 App Store 中更新。"
+          }
+        }
+      }
+    },
+    "macAppStoreUpdatingAlertInfoWithoutOnDemandMultiple (%@)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Please deactivate tunnels ‘%@’ and then continue updating in App Store."
           }
         }
       }
@@ -14702,6 +14724,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Quit AmneziaWG"
+          }
+        }
+      }
+    },
+    "macConfirmAndQuitInfoWithMultipleActiveTunnels (%@)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "If you close the tunnels manager, AmneziaWG will continue to be available from the menu bar icon.\n\nNote that if you quit AmneziaWG entirely the currently active tunnels ('%@') will still remain active until you deactivate them from this application or through the Network panel in System Preferences."
           }
         }
       }
@@ -20791,6 +20824,17 @@
         }
       }
     },
+    "macStatusMultipleTunnels (%d)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d tunnels"
+          }
+        }
+      }
+    },
     "macToggleStatusButtonDeactivate" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20906,6 +20950,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "停用"
+          }
+        }
+      }
+    },
+    "macToggleStatusButtonDeactivateAll" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deactivate All"
           }
         }
       }
