@@ -183,6 +183,7 @@ enum DaemonControlProtocol {
     }
 
     static func erase(_ data: inout Data) {
+        // Best effort only: Swift and JSONEncoder may retain independent copies.
         guard !data.isEmpty else { return }
         data.resetBytes(in: 0 ..< data.count)
     }

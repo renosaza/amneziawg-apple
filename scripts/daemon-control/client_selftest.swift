@@ -79,7 +79,7 @@ struct DaemonControlClientSelfTest {
         }
 
         let profileID = UUID(uuidString: "11111111-2222-4333-8444-555555555555")!
-        let testConfiguration = "private_key=test-only"
+        let testConfiguration = "private_key=test-only\n"
         let deadline = DaemonControlProtocol.deadline(after: 1)
         let start = try DaemonControlProtocol.makeRequest(
             operation: "start",
