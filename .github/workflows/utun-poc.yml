@@ -2,15 +2,12 @@ name: Synthetic utun POC
 
 on:
   workflow_dispatch:
-  pull_request:
-    types: [labeled]
 
 permissions:
   contents: read
 
 jobs:
   traffic:
-    if: github.event_name == 'workflow_dispatch' || (github.event.label.name == 'run-utun-poc' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: macos-latest
     timeout-minutes: 10
     steps:
