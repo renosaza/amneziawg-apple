@@ -10,6 +10,7 @@ active_ids:
   - C-DAEMON-INSTALL-EXPERIMENT
   - C-DAEMON-PROFILE-STORE-EXPERIMENT
   - C-DAEMON-STOCK-GUI-READONLY-EXPERIMENT
+  - C-DAEMON-ROUTE-PLAN-PROTOCOL-EXPERIMENT
 ---
 
 # Constraints
@@ -24,7 +25,8 @@ active_ids:
 - `C-DAEMON-PRECEDENCE-EXPERIMENT`: Decision 0009 permits one synthetic `198.51.100.0/24` fallback route on an owned daemon `utun` and its more-specific `198.51.100.10/32` physical route, only in a manual disposable-runner test. It may not configure `0/0`, `/1`, DNS, GUI, persistence, traffic, real endpoints, or automatic startup. Each route must retain and verify its own owner before cleanup.
 - `C-DAEMON-INSTALL-EXPERIMENT`: Decision 0010 permits a manually invoked, root-owned LaunchDaemon install/status/uninstall POC on a disposable macOS runner only. It installs fixed synthetic binaries and a UID-authenticated control socket; it must refuse uninstall unless the daemon proves it has no sessions; update is unsupported. It may not persist profiles, configure routes/DNS/PF, install automatically, update itself, publish releases, or receive real keys.
 - `C-DAEMON-PROFILE-STORE-EXPERIMENT`: Decision 0011 permits an isolated macOS user profile store with non-secret UUID/name metadata in user Application Support and configuration text in the ordinary login Keychain. It has no NetworkExtension ACL and is not connected to lifecycle control, routes, DNS, PF, installer, automatic startup, or runtime.
-- `C-DAEMON-STOCK-GUI-READONLY-EXPERIMENT`: Decision 0012 permits one separate unsigned macOS target to reuse the stock Manager UI for a launch-time, read-only view of `DaemonProfileStore` records and bounded daemon `list` status. It may not instantiate `NETunnelProviderManager`, send provider messages, forward configuration text to the daemon, modify the store, start or stop sessions, alter routes/DNS/PF, install itself, or publish a release.
+- `C-DAEMON-STOCK-GUI-READONLY-EXPERIMENT`: Decision 0013 permits one separate unsigned macOS target to reuse the stock Manager UI for a launch-time, read-only view of `DaemonProfileStore` records and bounded daemon `list` status. It may not instantiate `NETunnelProviderManager`, send provider messages, forward configuration text to the daemon, modify the store, start or stop sessions, alter routes/DNS/PF, install itself, or publish a release.
+- `C-DAEMON-ROUTE-PLAN-PROTOCOL-EXPERIMENT`: Decision 0014 permits the daemon-control IPC boundary to accept and strictly validate an optional `route_plan` on a `start` request. It must not store, forward, or apply the plan, mutate native routes, select an uplink, or weaken UAPI configuration validation.
 - Do not alter the AmneziaWG protocol or `amneziawg-go` for macOS UI multi-tunnel support.
 - Keep macOS multi-tunnel changes separate from iOS single-tunnel behavior.
 - A full route may coexist with a more-specific split route. Reject duplicate or ambiguous ownership within the same IP family before activation.

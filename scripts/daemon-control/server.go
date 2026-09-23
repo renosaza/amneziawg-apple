@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"sort"
@@ -22,20 +23,33 @@ import (
 )
 
 const (
-	maxFrameBytes  = 4 * 1024
-	maxProfiles    = 3
-	maxConnections = 16
-	maxSocketPath  = 103 // Darwin sun_path has room for a trailing NUL.
-	maxConfigBytes = 2 * 1024
+	maxFrameBytes      = 4 * 1024
+	maxProfiles        = 3
+	maxConnections     = 16
+	maxSocketPath      = 103 // Darwin sun_path has room for a trailing NUL.
+	maxConfigBytes     = 2 * 1024
+	maxRoutePlanRoutes = 16
 )
 
 var umaskMu sync.Mutex
 
 type request struct {
-	Version   int    `json:"version"`
-	Operation string `json:"operation"`
-	ProfileID string `json:"profile_id,omitempty"`
-	Config    string `json:"config,omitempty"`
+	Version   int             `json:"version"`
+	Operation string          `json:"operation"`
+	ProfileID string          `json:"profile_id,omitempty"`
+	Config    string          `json:"config,omitempty"`
+	RoutePlan json.RawMessage `json:"route_plan,omitempty"`
+}
+
+// routePlan matches WireGuardKit's MacOSDaemonRoutePlan JSON shape. It is
+// validated at the IPC boundary only; the experimental daemon does not apply it.
+type routePlan struct {
+	Routes json.RawMessage `json:"routes"`
+}
+
+type routePlanRoute struct {
+	Destination string `json:"destination"`
+	Owner       string `json:"owner"`
 }
 
 type Profile struct {
@@ -213,7 +227,7 @@ func decodeRequest(frame []byte) (request, error) {
 	}
 	switch request.Operation {
 	case "list", "quiesce":
-		if request.ProfileID != "" || request.Config != "" {
+		if request.ProfileID != "" || request.Config != "" || request.RoutePlan != nil {
 			return request, errors.New("operation does not accept a profile")
 		}
 	case "start":
@@ -224,15 +238,69 @@ func decodeRequest(frame []byte) (request, error) {
 		if err := validConfig(request.Config); err != nil {
 			return request, err
 		}
+		if err := validRoutePlan(request.RoutePlan); err != nil {
+			return request, err
+		}
 	case "stop", "status":
 		request.ProfileID = strings.ToLower(request.ProfileID)
-		if !validUUID(request.ProfileID) || request.Config != "" {
+		if !validUUID(request.ProfileID) || request.Config != "" || request.RoutePlan != nil {
 			return request, errors.New("invalid profile operation")
 		}
 	default:
 		return request, errors.New("unsupported operation")
 	}
 	return request, nil
+}
+
+func validRoutePlan(raw json.RawMessage) error {
+	if raw == nil {
+		return nil
+	}
+	if bytes.Equal(raw, []byte("null")) {
+		return errors.New("invalid route plan")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var plan routePlan
+	if err := decoder.Decode(&plan); err != nil {
+		return errors.New("invalid route plan")
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("invalid route plan")
+	}
+	if plan.Routes == nil || bytes.Equal(plan.Routes, []byte("null")) {
+		return errors.New("invalid route plan")
+	}
+	decoder = json.NewDecoder(bytes.NewReader(plan.Routes))
+	decoder.DisallowUnknownFields()
+	var routes []routePlanRoute
+	if err := decoder.Decode(&routes); err != nil {
+		return errors.New("invalid route plan")
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("invalid route plan")
+	}
+	if len(routes) > maxRoutePlanRoutes {
+		return errors.New("invalid route plan")
+	}
+	seen := make(map[netip.Prefix]struct{}, len(routes))
+	for _, route := range routes {
+		prefix, err := netip.ParsePrefix(route.Destination)
+		if err != nil || !prefix.Addr().Is4() || prefix != prefix.Masked() || prefix.String() != route.Destination || prefix.Bits() <= 1 {
+			return errors.New("invalid route plan")
+		}
+		if route.Owner != "tunnel" && route.Owner != "physicalEndpoint" {
+			return errors.New("invalid route plan")
+		}
+		if route.Owner == "physicalEndpoint" && prefix.Bits() != 32 {
+			return errors.New("invalid route plan")
+		}
+		if _, duplicate := seen[prefix]; duplicate {
+			return errors.New("invalid route plan")
+		}
+		seen[prefix] = struct{}{}
+	}
+	return nil
 }
 
 func validConfig(config string) error {
