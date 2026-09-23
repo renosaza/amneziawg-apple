@@ -15,23 +15,33 @@ import (
 )
 
 var syntheticEndpointPrefix = netip.MustParsePrefix("203.0.113.0/24")
+var syntheticPrecedencePrefix = netip.MustParsePrefix("198.51.100.0/24")
 
 // PhysicalEndpointRoute owns one synthetic endpoint host route via the active physical gateway.
 type PhysicalEndpointRoute struct {
 	target, gateway netip.Addr
+	prefix          netip.Prefix
 	iface           *net.Interface
 	routeSet        bool
 }
 
 func configureSyntheticPhysicalEndpointRoute(targetText string) (*PhysicalEndpointRoute, error) {
+	return configureSyntheticPhysicalEndpointRouteInPrefix(targetText, syntheticEndpointPrefix)
+}
+
+func configureSyntheticPrecedenceEndpointRoute(targetText string) (*PhysicalEndpointRoute, error) {
+	return configureSyntheticPhysicalEndpointRouteInPrefix(targetText, syntheticPrecedencePrefix)
+}
+
+func configureSyntheticPhysicalEndpointRouteInPrefix(targetText string, prefix netip.Prefix) (*PhysicalEndpointRoute, error) {
 	if os.Geteuid() != 0 {
 		return nil, errors.New("synthetic endpoint route requires root")
 	}
-	target, err := syntheticEndpoint(targetText)
+	target, err := syntheticEndpointInPrefix(targetText, prefix)
 	if err != nil {
 		return nil, err
 	}
-	configured := &PhysicalEndpointRoute{target: target}
+	configured := &PhysicalEndpointRoute{target: target, prefix: prefix}
 	existing, err := configured.lookup()
 	if err != nil || existing.Err != nil {
 		return nil, errors.Join(err, existing.Err)
@@ -59,9 +69,13 @@ func configureSyntheticPhysicalEndpointRoute(targetText string) (*PhysicalEndpoi
 }
 
 func syntheticEndpoint(text string) (netip.Addr, error) {
+	return syntheticEndpointInPrefix(text, syntheticEndpointPrefix)
+}
+
+func syntheticEndpointInPrefix(text string, prefix netip.Prefix) (netip.Addr, error) {
 	target, err := netip.ParseAddr(text)
-	if err != nil || !target.Is4() || !syntheticEndpointPrefix.Contains(target) {
-		return netip.Addr{}, errors.New("synthetic endpoint must be TEST-NET-3 IPv4")
+	if err != nil || !target.Is4() || (prefix != syntheticEndpointPrefix && prefix != syntheticPrecedencePrefix) || !prefix.Contains(target) {
+		return netip.Addr{}, errors.New("synthetic endpoint must be allowed TEST-NET IPv4")
 	}
 	return target, nil
 }
@@ -153,7 +167,7 @@ func (configured *PhysicalEndpointRoute) lookup() (*route.RouteMessage, error) {
 }
 
 func (configured *PhysicalEndpointRoute) validatePhysicalGateway() error {
-	probe, err := endpointProbe(configured.target)
+	probe, err := endpointProbe(configured.target, configured.prefix)
 	if err != nil {
 		return err
 	}
@@ -172,9 +186,9 @@ func (configured *PhysicalEndpointRoute) matchesPhysicalGateway(gateway netip.Ad
 	return iface != nil && gateway == configured.gateway && iface.Index == configured.iface.Index && iface.Name == configured.iface.Name
 }
 
-func endpointProbe(target netip.Addr) (netip.Addr, error) {
+func endpointProbe(target netip.Addr, prefix netip.Prefix) (netip.Addr, error) {
 	probe := target.Next()
-	if !probe.IsValid() || !syntheticEndpointPrefix.Contains(probe) {
+	if !probe.IsValid() || !prefix.Contains(probe) {
 		return netip.Addr{}, errors.New("synthetic endpoint has no probe address")
 	}
 	return probe, nil

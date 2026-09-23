@@ -22,6 +22,9 @@ func TestSyntheticPhysicalEndpointValidation(t *testing.T) {
 			t.Fatalf("accepted non-TEST-NET-3 endpoint %q", target)
 		}
 	}
+	if _, err := syntheticEndpointInPrefix("1.1.1.1", netip.PrefixFrom(netip.MustParseAddr("0.0.0.0"), 0)); err == nil {
+		t.Fatal("accepted a non-synthetic endpoint prefix")
+	}
 }
 
 func TestSyntheticPhysicalEndpointOwnership(t *testing.T) {
