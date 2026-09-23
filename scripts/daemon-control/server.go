@@ -23,7 +23,7 @@ import (
 
 const (
 	maxFrameBytes  = 4 * 1024
-	maxProfiles    = 1
+	maxProfiles    = 3
 	maxConnections = 16
 	maxSocketPath  = 103 // Darwin sun_path has room for a trailing NUL.
 	maxConfigBytes = 2 * 1024
@@ -50,7 +50,7 @@ type response struct {
 	Profiles []Profile `json:"profiles,omitempty"`
 }
 
-// Server owns one user's ephemeral fake backend state.
+// Server owns one user's ephemeral backend sessions.
 type Server struct {
 	allowedUID  uint32
 	mu          sync.Mutex

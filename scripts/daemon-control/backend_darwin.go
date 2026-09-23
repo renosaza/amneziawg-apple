@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const tunnelStatePrefix = "amneziawg-daemon-single."
+const tunnelStatePrefix = "amneziawg-daemon."
 
 var utunName = regexp.MustCompile(`^utun[0-9]+$`)
 

@@ -13,30 +13,43 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
 const profileID = "11111111-2222-4333-8444-555555555555"
+const profileIDTwo = "22222222-2222-4333-8444-555555555555"
+const profileIDThree = "33333333-2222-4333-8444-555555555555"
 const syntheticConfig = "private_key=synthetic"
 
 type fakeBackend struct {
+	mu           sync.Mutex
 	config       string
 	starts       int
 	stops        int
 	fail         bool
+	failStarts   int
 	status       error
 	stopFailures int
 }
 
 func (backend *fakeBackend) Start(config string) (Session, error) {
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
 	backend.config, backend.starts = config, backend.starts+1
 	if backend.fail {
 		return Session{}, errors.New("synthetic failure")
 	}
-	return Session{}, nil
+	if backend.failStarts > 0 {
+		backend.failStarts--
+		return Session{}, errors.New("synthetic failure")
+	}
+	return Session{value: backend.starts}, nil
 }
 func (backend *fakeBackend) Stop(Session) error {
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
 	backend.stops++
 	if backend.stopFailures > 0 {
 		backend.stopFailures--
@@ -44,7 +57,17 @@ func (backend *fakeBackend) Stop(Session) error {
 	}
 	return nil
 }
-func (backend *fakeBackend) Status(Session) error { return backend.status }
+func (backend *fakeBackend) Status(Session) error {
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	return backend.status
+}
+
+func (backend *fakeBackend) counts() (starts, stops int) {
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	return backend.starts, backend.stops
+}
 
 func exchange(t *testing.T, server *Server, uid uint32, frame []byte) response {
 	t.Helper()
@@ -90,7 +113,8 @@ func TestStartStopStatusAndList(t *testing.T) {
 	if !start.OK || start.Profile == nil || start.Profile.Status != "running" {
 		t.Fatalf("unexpected start response: %#v", start)
 	}
-	if backend.config != syntheticConfig || backend.starts != 1 {
+	starts, _ := backend.counts()
+	if backend.config != syntheticConfig || starts != 1 {
 		t.Fatalf("backend received unexpected config")
 	}
 	status := exchange(t, server, 501, requestFrame(t, `{"version":1,"operation":"status","profile_id":"`+profileID+`"}`))
@@ -105,12 +129,71 @@ func TestStartStopStatusAndList(t *testing.T) {
 	if !stop.OK || stop.Profile == nil || stop.Profile.Status != "stopped" {
 		t.Fatalf("unexpected stop response: %#v", stop)
 	}
-	if backend.stops != 1 {
+	_, stops := backend.counts()
+	if stops != 1 {
 		t.Fatalf("backend was not stopped")
 	}
 	notFound := exchange(t, server, 501, requestFrame(t, `{"version":1,"operation":"status","profile_id":"`+profileID+`"}`))
 	if notFound.OK || notFound.Error != "not_found" {
 		t.Fatalf("unexpected missing status response: %#v", notFound)
+	}
+}
+
+func TestThreeProfilesRemainIndependent(t *testing.T) {
+	backend := &fakeBackend{}
+	server, err := NewServerWithBackend(501, backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{profileID, profileIDTwo, profileIDThree} {
+		if response := server.apply(request{Operation: "start", ProfileID: id, Config: syntheticConfig}); !response.OK {
+			t.Fatalf("start %s: %#v", id, response)
+		}
+	}
+	if response := server.apply(request{Operation: "start", ProfileID: profileIDTwo, Config: syntheticConfig}); response.Error != "already_running" {
+		t.Fatalf("duplicate start: %#v", response)
+	}
+	if response := server.apply(request{Operation: "start", ProfileID: "44444444-2222-4333-8444-555555555555", Config: syntheticConfig}); response.Error != "capacity" {
+		t.Fatalf("capacity: %#v", response)
+	}
+	if starts, _ := backend.counts(); starts != 3 {
+		t.Fatalf("starts=%d", starts)
+	}
+	if response := server.apply(request{Operation: "stop", ProfileID: profileIDTwo}); !response.OK {
+		t.Fatalf("stop middle profile: %#v", response)
+	}
+	for _, id := range []string{profileID, profileIDThree} {
+		if response := server.apply(request{Operation: "status", ProfileID: id}); !response.OK {
+			t.Fatalf("remaining profile %s: %#v", id, response)
+		}
+	}
+	list := server.apply(request{Operation: "list"})
+	if !list.OK || len(list.Profiles) != 2 || list.Profiles[0].ID != profileID || list.Profiles[1].ID != profileIDThree {
+		t.Fatalf("remaining profiles: %#v", list)
+	}
+	if err := server.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, stops := backend.counts()
+	if stops != 3 {
+		t.Fatalf("stops=%d", stops)
+	}
+}
+
+func TestFailedStartDoesNotClaimProfile(t *testing.T) {
+	backend := &fakeBackend{failStarts: 1}
+	server, err := NewServerWithBackend(501, backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response := server.apply(request{Operation: "start", ProfileID: profileID, Config: syntheticConfig}); response.Error != "start_failed" {
+		t.Fatalf("failed start: %#v", response)
+	}
+	if response := server.apply(request{Operation: "list"}); !response.OK || len(response.Profiles) != 0 {
+		t.Fatalf("failed start claimed a profile: %#v", response)
+	}
+	if response := server.apply(request{Operation: "start", ProfileID: profileID, Config: syntheticConfig}); !response.OK {
+		t.Fatalf("retry after failed start: %#v", response)
 	}
 }
 
@@ -141,8 +224,9 @@ func TestCloseStopsOwnedSessionsAndRejectsNewWork(t *testing.T) {
 	if err := server.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if backend.stops != 1 {
-		t.Fatalf("stops=%d", backend.stops)
+	_, stops := backend.counts()
+	if stops != 1 {
+		t.Fatalf("stops=%d", stops)
 	}
 	if response := server.apply(request{Operation: "list"}); response.Error != "shutting_down" {
 		t.Fatalf("unexpected close response: %#v", response)
@@ -168,8 +252,9 @@ func TestStatusFailureRetainsOwnedSessionForClose(t *testing.T) {
 	if err := server.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if backend.stops != 1 {
-		t.Fatalf("stops=%d", backend.stops)
+	_, stops := backend.counts()
+	if stops != 1 {
+		t.Fatalf("stops=%d", stops)
 	}
 }
 
@@ -186,8 +271,9 @@ func TestConcurrentCloseAndOperation(t *testing.T) {
 	go func() { _ = server.Close(); close(done) }()
 	_ = server.apply(request{Operation: "status", ProfileID: profileID})
 	<-done
-	if backend.stops != 1 {
-		t.Fatalf("stops=%d", backend.stops)
+	_, stops := backend.counts()
+	if stops != 1 {
+		t.Fatalf("stops=%d", stops)
 	}
 }
 
@@ -209,8 +295,9 @@ func TestCloseRetainsFailedStopForRetry(t *testing.T) {
 	if err := server.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if backend.stops != 2 {
-		t.Fatalf("stops=%d", backend.stops)
+	_, stops := backend.counts()
+	if stops != 2 {
+		t.Fatalf("stops=%d", stops)
 	}
 }
 

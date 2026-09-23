@@ -1,7 +1,7 @@
 ---
 id: 0005-free-macos-single-profile-daemon-poc
 type: decision
-status: accepted
+status: deprecated
 scope: experimental-macos-cli
 date: 2026-09-23
 supersedes: null
@@ -11,6 +11,8 @@ constraints:
 ---
 
 # One-profile daemon lifecycle experiment
+
+Superseded by [Decision 0006](0006-free-macos-three-session-daemon-poc.md).
 
 ## Decision
 
