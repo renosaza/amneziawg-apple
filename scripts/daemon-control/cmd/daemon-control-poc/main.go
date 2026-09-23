@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/renosaza/amneziawg-daemon-control-poc"
 )
@@ -52,15 +53,26 @@ func main() {
 	}()
 	if err := server.Serve(listener); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		if cleanupErr := server.Close(); cleanupErr != nil {
-			fmt.Fprintln(os.Stderr, "daemon cleanup failed")
+		if cleanupErr := cleanup(server); cleanupErr != nil {
+			fmt.Fprintln(os.Stderr, "daemon cleanup failed after retries")
 		}
 		os.Exit(1)
 	}
-	if err := server.Close(); err != nil {
-		fmt.Fprintln(os.Stderr, "daemon cleanup failed")
+	if err := cleanup(server); err != nil {
+		fmt.Fprintln(os.Stderr, "daemon cleanup failed after retries")
 		os.Exit(1)
 	}
+}
+
+func cleanup(server *daemoncontrol.Server) error {
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		if err = server.Close(); err == nil {
+			return nil
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return err
 }
 
 func parseUID(value string) (uint32, error) {

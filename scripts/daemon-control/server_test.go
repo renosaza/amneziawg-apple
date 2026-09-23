@@ -21,11 +21,12 @@ const profileID = "11111111-2222-4333-8444-555555555555"
 const syntheticConfig = "private_key=synthetic"
 
 type fakeBackend struct {
-	config string
-	starts int
-	stops  int
-	fail   bool
-	status error
+	config       string
+	starts       int
+	stops        int
+	fail         bool
+	status       error
+	stopFailures int
 }
 
 func (backend *fakeBackend) Start(config string) (Session, error) {
@@ -35,7 +36,14 @@ func (backend *fakeBackend) Start(config string) (Session, error) {
 	}
 	return Session{}, nil
 }
-func (backend *fakeBackend) Stop(Session) error   { backend.stops++; return nil }
+func (backend *fakeBackend) Stop(Session) error {
+	backend.stops++
+	if backend.stopFailures > 0 {
+		backend.stopFailures--
+		return errors.New("synthetic stop failure")
+	}
+	return nil
+}
 func (backend *fakeBackend) Status(Session) error { return backend.status }
 
 func exchange(t *testing.T, server *Server, uid uint32, frame []byte) response {
@@ -179,6 +187,29 @@ func TestConcurrentCloseAndOperation(t *testing.T) {
 	_ = server.apply(request{Operation: "status", ProfileID: profileID})
 	<-done
 	if backend.stops != 1 {
+		t.Fatalf("stops=%d", backend.stops)
+	}
+}
+
+func TestCloseRetainsFailedStopForRetry(t *testing.T) {
+	backend := &fakeBackend{stopFailures: 1}
+	server, err := NewServerWithBackend(501, backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response := server.apply(request{Operation: "start", ProfileID: profileID, Config: syntheticConfig}); !response.OK {
+		t.Fatalf("start: %#v", response)
+	}
+	if err := server.Close(); err == nil {
+		t.Fatal("first close unexpectedly succeeded")
+	}
+	if response := server.apply(request{Operation: "list"}); response.Error != "shutting_down" {
+		t.Fatalf("new work accepted: %#v", response)
+	}
+	if err := server.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if backend.stops != 2 {
 		t.Fatalf("stops=%d", backend.stops)
 	}
 }

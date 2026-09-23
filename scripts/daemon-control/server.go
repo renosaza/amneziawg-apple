@@ -58,8 +58,7 @@ type Server struct {
 	backend     Backend
 	connections chan struct{}
 	closed      bool
-	closeOnce   sync.Once
-	closeError  error
+	closeMu     sync.Mutex
 }
 
 func NewServer(allowedUID uint32) (*Server, error) {
@@ -168,21 +167,26 @@ func (server *Server) apply(request request) response {
 
 // Close prevents new operations and stops every child owned by this server.
 func (server *Server) Close() error {
-	server.closeOnce.Do(func() {
-		server.mu.Lock()
-		server.closed = true
-		sessions := server.profiles
-		server.profiles = make(map[string]Session)
-		server.mu.Unlock()
-		var problems []error
-		for _, session := range sessions {
-			if err := server.backend.Stop(session); err != nil {
-				problems = append(problems, err)
-			}
+	server.closeMu.Lock()
+	defer server.closeMu.Unlock()
+	server.mu.Lock()
+	server.closed = true
+	sessions := make(map[string]Session, len(server.profiles))
+	for id, session := range server.profiles {
+		sessions[id] = session
+	}
+	server.mu.Unlock()
+	var problems []error
+	for id, session := range sessions {
+		if err := server.backend.Stop(session); err != nil {
+			problems = append(problems, err)
+			continue
 		}
-		server.closeError = errors.Join(problems...)
-	})
-	return server.closeError
+		server.mu.Lock()
+		delete(server.profiles, id)
+		server.mu.Unlock()
+	}
+	return errors.Join(problems...)
 }
 
 func decodeRequest(frame []byte) (request, error) {
