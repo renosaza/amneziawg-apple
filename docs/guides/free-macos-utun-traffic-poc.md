@@ -32,7 +32,8 @@ it on a Mac with a real VPN.
 
 ## Disposable CI
 
-`.github/workflows/utun-poc.yml` is manual-only. It builds the pinned backend,
-runs the no-network self-check, then runs the proof with `sudo` on a fresh
-GitHub macOS runner. A pre-existing `utun` causes a failure before any change.
-No CI run has been recorded from this branch yet.
+`.github/workflows/utun-poc.yml` runs manually or when the `run-utun-poc`
+label is added to a pull request whose head is in this repository. It builds
+the pinned backend, runs the no-network self-check, then runs the proof with
+`sudo` on a fresh GitHub macOS runner. A pre-existing `utun` causes a failure
+before any change. No CI run has been recorded from this branch yet.

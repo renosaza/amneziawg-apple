@@ -2,12 +2,15 @@ name: Synthetic utun POC
 
 on:
   workflow_dispatch:
+  pull_request:
+    types: [labeled]
 
 permissions:
   contents: read
 
 jobs:
   traffic:
+    if: github.event_name == 'workflow_dispatch' || (github.event.label.name == 'run-utun-poc' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: macos-latest
     timeout-minutes: 10
     steps:
@@ -22,5 +25,6 @@ jobs:
           set -euo pipefail
           mkdir -p out
           go build -C Sources/WireGuardKitGo -o ../../out/amneziawg-go github.com/amnezia-vpn/amneziawg-go/v3
+          go build -o out/utun-poc-traffic scripts/utun-poc-traffic.go
           scripts/test-utun-poc-traffic.sh
           sudo out/utun-poc-traffic -binary "$GITHUB_WORKSPACE/out/amneziawg-go"

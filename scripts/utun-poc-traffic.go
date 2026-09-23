@@ -9,6 +9,7 @@ import (
 	"crypto/ecdh"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -116,7 +117,9 @@ func start(ctx context.Context, binary, directory string, d *device) error {
 				return fmt.Errorf("%s reported invalid interface %q", d.label, d.name)
 			}
 			if _, err := os.Stat(filepath.Join(uapiDir, d.name+".sock")); err == nil {
-				return nil
+				if _, err := uapi(d.name, "get=1"); err == nil {
+					return nil
+				}
 			}
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -218,15 +221,24 @@ func verify(d *device) error {
 	return nil
 }
 
-func stop(ctx context.Context, devices []*device, directory string) {
+func stop(ctx context.Context, devices []*device, directory string) error {
+	var cleanupErrors []error
 	for _, d := range devices {
 		if d.explicitRoute {
-			_ = run(ctx, "/sbin/route", "-n", "delete", "-host", d.peerAddress, "-interface", d.name)
+			if !routeUses(ctx, d.peerAddress, d.name) {
+				cleanupErrors = append(cleanupErrors, fmt.Errorf("refusing to delete %s: it is no longer owned by %s", d.peerAddress, d.name))
+				continue
+			}
+			if err := run(ctx, "/sbin/route", "-n", "delete", "-host", d.peerAddress, "-interface", d.name); err != nil {
+				cleanupErrors = append(cleanupErrors, err)
+			}
 		}
 	}
 	for _, d := range devices {
 		if d.cmd != nil && d.cmd.Process != nil {
-			_ = d.cmd.Process.Signal(syscall.SIGTERM)
+			if err := d.cmd.Process.Signal(syscall.SIGTERM); err != nil && !errors.Is(err, os.ErrProcessDone) {
+				cleanupErrors = append(cleanupErrors, err)
+			}
 		}
 	}
 	for _, d := range devices {
@@ -236,14 +248,26 @@ func stop(ctx context.Context, devices []*device, directory string) {
 		done := make(chan error, 1)
 		go func(command *exec.Cmd) { done <- command.Wait() }(d.cmd)
 		select {
-		case <-done:
+		case err := <-done:
+			if err != nil {
+				if _, expected := err.(*exec.ExitError); !expected {
+					cleanupErrors = append(cleanupErrors, err)
+				}
+			}
 		case <-time.After(3 * time.Second):
-			_ = d.cmd.Process.Kill()
-			<-done
+			if err := d.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+				cleanupErrors = append(cleanupErrors, err)
+			}
+			if err := <-done; err != nil {
+				if _, expected := err.(*exec.ExitError); !expected {
+					cleanupErrors = append(cleanupErrors, err)
+				}
+			}
 		}
 		_ = os.Remove(filepath.Join(directory, d.label+".name"))
 	}
 	_ = os.Remove(directory)
+	return errors.Join(cleanupErrors...)
 }
 
 func selfCheck() error {
@@ -254,6 +278,13 @@ func selfCheck() error {
 	repeatedKey, _, err := key(devices[0].label)
 	if err != nil || len(devices) != 6 || devices[0].privateKey == devices[0].publicKey || devices[0].privateKey != repeatedKey {
 		return fmt.Errorf("deterministic topology check failed")
+	}
+	keys, addresses := make(map[string]bool), make(map[string]bool)
+	for _, d := range devices {
+		if keys[d.publicKey] || addresses[d.address] || d.address == d.peerAddress {
+			return fmt.Errorf("topology is not unique")
+		}
+		keys[d.publicKey], addresses[d.address] = true, true
 	}
 	fields, err := parseReply("rx_bytes=42\ntx_bytes=42\nlast_handshake_time_sec=1\nerrno=0\n")
 	if err != nil {
@@ -266,6 +297,52 @@ func selfCheck() error {
 	}
 	if _, err := parseReply("errno=1\n"); err == nil {
 		return fmt.Errorf("UAPI error reply was accepted")
+	}
+	return nil
+}
+
+func runProof(ctx context.Context, binary string) (err error) {
+	if err := checkIdle(ctx); err != nil {
+		return err
+	}
+	devices, err := topology()
+	if err != nil {
+		return err
+	}
+	directory, err := os.MkdirTemp("/private/tmp", "amneziawg-utun-traffic-poc.")
+	if err != nil {
+		return err
+	}
+	if err := os.Chmod(directory, 0700); err != nil {
+		_ = os.Remove(directory)
+		return err
+	}
+	defer func() { err = errors.Join(err, stop(context.Background(), devices, directory)) }()
+	for _, d := range devices {
+		if err := start(ctx, binary, directory, d); err != nil {
+			return err
+		}
+	}
+	for i := 0; i < len(devices); i += 2 {
+		if err := configure(devices[i], devices[i+1]); err != nil {
+			return err
+		}
+	}
+	for _, d := range devices {
+		if err := configureInterface(ctx, d); err != nil {
+			return err
+		}
+	}
+	for i := 1; i < len(devices); i += 2 {
+		if err := run(ctx, "/sbin/ping", "-n", "-c", "1", "-W", "1000", devices[i-1].address); err != nil {
+			return err
+		}
+	}
+	for _, d := range devices {
+		if err := verify(d); err != nil {
+			return err
+		}
+		fmt.Printf("%s: %s %s -> %s\n", d.label, d.name, d.address, d.peerAddress)
 	}
 	return nil
 }
@@ -292,54 +369,8 @@ func main() {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	if err := checkIdle(ctx); err != nil {
+	if err := runProof(ctx, *binary); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
-	}
-	devices, err := topology()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	directory, err := os.MkdirTemp("/private/tmp", "amneziawg-utun-traffic-poc.")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	if err := os.Chmod(directory, 0700); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	defer stop(context.Background(), devices, directory)
-	for _, d := range devices {
-		if err := start(ctx, *binary, directory, d); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-	}
-	for i := 0; i < len(devices); i += 2 {
-		if err := configure(devices[i], devices[i+1]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-	}
-	for _, d := range devices {
-		if err := configureInterface(ctx, d); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-	}
-	for i := 1; i < len(devices); i += 2 {
-		if err := run(ctx, "/sbin/ping", "-n", "-c", "1", "-W", "1000", devices[i-1].address); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-	}
-	for _, d := range devices {
-		if err := verify(d); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		fmt.Printf("%s: %s %s -> %s\n", d.label, d.name, d.address, d.peerAddress)
 	}
 }
