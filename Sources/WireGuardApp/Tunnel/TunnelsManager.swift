@@ -55,9 +55,17 @@ class TunnelsManager {
     private var configurationsObservationToken: NotificationToken?
 
     init(tunnelProviders: [NETunnelProviderManager]) {
-        tunnels = tunnelProviders.map { TunnelContainer(tunnel: $0) }.sorted {
+        self.init(
+            tunnels: tunnelProviders.map { TunnelContainer(tunnel: $0) },
+            observesNetworkExtension: true
+        )
+    }
+
+    init(tunnels: [TunnelContainer], observesNetworkExtension: Bool) {
+        self.tunnels = tunnels.sorted {
             TunnelsManager.tunnelNameIsLessThan($0.name, $1.name)
         }
+        guard observesNetworkExtension else { return }
         startObservingTunnelStatuses()
         startObservingTunnelConfigurations()
     }
@@ -789,6 +797,7 @@ class TunnelContainer: NSObject {
     var isAttemptingActivation = false {
         didSet {
             if isAttemptingActivation {
+                guard networkExtensionTunnelProvider != nil else { return }
                 self.activationTimer?.invalidate()
                 let activationTimer = Timer(timeInterval: 5 /* seconds */, repeats: true) {
                     [weak self] _ in
@@ -828,43 +837,66 @@ class TunnelContainer: NSObject {
         private var appWillEnterForegroundObserver: NSObjectProtocol?
     #endif
 
+    private var networkExtensionTunnelProvider: NETunnelProviderManager?
+    private let daemonConfiguration: TunnelConfiguration?
+
     fileprivate var tunnelProvider: NETunnelProviderManager {
-        didSet {
-            isActivateOnDemandEnabled = tunnelProvider.isOnDemandEnabled && tunnelProvider.isEnabled
-            hasOnDemandRules = !(tunnelProvider.onDemandRules ?? []).isEmpty
+        get {
+            guard let networkExtensionTunnelProvider else {
+                fatalError("Daemon-backed tunnel has no NetworkExtension provider")
+            }
+            return networkExtensionTunnelProvider
+        }
+        set {
+            networkExtensionTunnelProvider = newValue
+            isActivateOnDemandEnabled = newValue.isOnDemandEnabled && newValue.isEnabled
+            hasOnDemandRules = !(newValue.onDemandRules ?? []).isEmpty
         }
     }
 
     var tunnelConfiguration: TunnelConfiguration? {
-        return tunnelProvider.tunnelConfiguration
+        daemonConfiguration ?? networkExtensionTunnelProvider?.tunnelConfiguration
     }
 
     var onDemandOption: ActivateOnDemandOption {
-        return ActivateOnDemandOption(from: tunnelProvider)
+        guard let networkExtensionTunnelProvider else { return .off }
+        return ActivateOnDemandOption(from: networkExtensionTunnelProvider)
     }
 
     #if os(macOS)
         var isTunnelAvailableToUser: Bool {
-            return (tunnelProvider.protocolConfiguration as? NETunnelProviderProtocol)?
+            guard let networkExtensionTunnelProvider else { return daemonConfiguration != nil }
+            return (networkExtensionTunnelProvider.protocolConfiguration as? NETunnelProviderProtocol)?
                 .providerConfiguration?["UID"] as? uid_t == getuid()
         }
     #endif
 
     init(tunnel: NETunnelProviderManager) {
         name = tunnel.localizedDescription ?? "Unnamed"
-        let status = TunnelStatus(from: tunnel.connection.status)
-        self.status = status
+        status = TunnelStatus(from: tunnel.connection.status)
         isActivateOnDemandEnabled = tunnel.isOnDemandEnabled && tunnel.isEnabled
         hasOnDemandRules = !(tunnel.onDemandRules ?? []).isEmpty
-        tunnelProvider = tunnel
+        networkExtensionTunnelProvider = tunnel
+        daemonConfiguration = nil
+        super.init()
+    }
+
+    init(daemonConfiguration: TunnelConfiguration, status: TunnelStatus) {
+        name = daemonConfiguration.name ?? "Unnamed"
+        self.status = status
+        isActivateOnDemandEnabled = false
+        hasOnDemandRules = false
+        networkExtensionTunnelProvider = nil
+        self.daemonConfiguration = daemonConfiguration
         super.init()
     }
 
     func getRuntimeTunnelConfiguration(
         completionHandler: @escaping ((TunnelConfiguration?) -> Void)
     ) {
-        guard status != .inactive,
-            let session = tunnelProvider.connection as? NETunnelProviderSession
+        guard let networkExtensionTunnelProvider,
+            status != .inactive,
+            let session = networkExtensionTunnelProvider.connection as? NETunnelProviderSession
         else {
             completionHandler(tunnelConfiguration)
             return
@@ -907,12 +939,13 @@ class TunnelContainer: NSObject {
     }
 
     func refreshStatus() {
+        guard let networkExtensionTunnelProvider else { return }
         if (status == .restarting)
-            || (status == .waiting && tunnelProvider.connection.status == .disconnected)
+            || (status == .waiting && networkExtensionTunnelProvider.connection.status == .disconnected)
         {
             return
         }
-        let systemStatus = tunnelProvider.connection.status
+        let systemStatus = networkExtensionTunnelProvider.connection.status
         #if os(iOS)
             if systemStatus == .connected {
                 status =
@@ -949,14 +982,15 @@ class TunnelContainer: NSObject {
             cancelHandshakeMonitoring()
         #endif
 
-        guard tunnelProvider.isEnabled else {
+        guard let networkExtensionTunnelProvider else { return }
+        guard networkExtensionTunnelProvider.isEnabled else {
             // In case the tunnel had gotten disabled, re-enable and save it,
             // then call this function again.
             wg_log(
                 .debug, staticMessage: "startActivation: Tunnel is disabled. Re-enabling and saving"
             )
-            tunnelProvider.isEnabled = true
-            tunnelProvider.saveToPreferences { [weak self] error in
+            networkExtensionTunnelProvider.isEnabled = true
+            networkExtensionTunnelProvider.saveToPreferences { [weak self] error in
                 guard let self = self else { return }
                 if error != nil {
                     wg_log(.error, message: "Error saving tunnel after re-enabling: \(error!)")
@@ -982,7 +1016,7 @@ class TunnelContainer: NSObject {
             isAttemptingActivation = true
             let activationAttemptId = UUID().uuidString
             self.activationAttemptId = activationAttemptId
-            try (tunnelProvider.connection as? NETunnelProviderSession)?.startTunnel(options: [
+            try (networkExtensionTunnelProvider.connection as? NETunnelProviderSession)?.startTunnel(options: [
                 "activationAttemptId": activationAttemptId
             ])
             wg_log(.debug, staticMessage: "startActivation: Success")
@@ -1009,7 +1043,7 @@ class TunnelContainer: NSObject {
             wg_log(
                 .debug,
                 staticMessage: "startActivation: Will reload tunnel and then try to start it.")
-            tunnelProvider.loadFromPreferences { [weak self] error in
+            networkExtensionTunnelProvider.loadFromPreferences { [weak self] error in
                 guard let self = self else { return }
                 if error != nil {
                     wg_log(.error, message: "startActivation: Error reloading tunnel: \(error!)")
@@ -1033,7 +1067,7 @@ class TunnelContainer: NSObject {
         #if os(iOS)
             cancelHandshakeMonitoring()
         #endif
-        (tunnelProvider.connection as? NETunnelProviderSession)?.stopTunnel()
+        (networkExtensionTunnelProvider?.connection as? NETunnelProviderSession)?.stopTunnel()
     }
 
     deinit {

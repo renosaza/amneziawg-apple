@@ -26,8 +26,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
+        #if DAEMON_MODE
+            Logger.configureGlobal(tagged: "APP", withFilePath: nil)
+        #else
         Logger.configureGlobal(tagged: "APP", withFilePath: FileManager.logFileURL?.path)
         registerLoginItem(shouldLaunchAtLogin: true)
+        #endif
 
         var isLaunchedAtLogin = false
         if let appleEvent = NSAppleEventManager.shared().currentAppleEvent {
@@ -37,7 +41,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = MainMenu()
         setDockIconAndMainMenuVisibility(isVisible: !isLaunchedAtLogin)
 
-        TunnelsManager.create { [weak self] result in
+        let managerLoaded: (Result<TunnelsManager, TunnelsManagerError>) -> Void = { [weak self] result in
             guard let self = self else { return }
 
             switch result {
@@ -63,6 +67,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+        #if DAEMON_MODE
+            DaemonTunnelsManager.createDaemon(completionHandler: managerLoaded)
+        #else
+            TunnelsManager.create(completionHandler: managerLoaded)
+        #endif
     }
 
     private var activeTunnels: [TunnelContainer] {
@@ -105,7 +114,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             manageWindow.orderFront(self)
             return
         }
-        registerLoginItem(shouldLaunchAtLogin: false)
+        #if !DAEMON_MODE
+            registerLoginItem(shouldLaunchAtLogin: false)
+        #endif
         guard !activeTunnels.isEmpty else {
             NSApp.terminate(nil)
             return
