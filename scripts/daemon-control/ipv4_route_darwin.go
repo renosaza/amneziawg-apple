@@ -164,6 +164,8 @@ type IPv4Route struct {
 
 var routeSequence atomic.Uint32
 
+var errRouteOutcomeUnknown = errors.New("route kernel outcome unknown")
+
 var (
 	addressStateErrorCode = int(C.ADDRESS_STATE_ERROR)
 	addressStateAbsent    = int(C.ADDRESS_STATE_ABSENT)
@@ -209,10 +211,10 @@ func configureSyntheticIPv4Route(process *tunnelProcess, localText, peerText, ta
 		}
 	}
 	if err := configured.add(); err != nil {
-		return nil, errors.Join(err, configured.Close())
+		return configured.cleanupFailedRouteAdd(err)
 	}
 	if err := configured.verify(); err != nil {
-		return nil, errors.Join(err, configured.Close())
+		return configured.cleanupFailedRouteAdd(err)
 	}
 	return configured, nil
 }
@@ -354,14 +356,28 @@ func (configured *IPv4Route) verify() error {
 func (configured *IPv4Route) write(kind int) error {
 	message, err := configured.request(kind)
 	if err != nil {
+		configured.recordRouteWrite(kind, err)
 		return err
 	}
 	configured.recordRouteWrite(kind, message.Err)
 	return message.Err
 }
 
+func (configured *IPv4Route) cleanupFailedRouteAdd(err error) (*IPv4Route, error) {
+	if !configured.routeSet {
+		return nil, err
+	}
+	if cleanupErr := configured.Close(); cleanupErr != nil {
+		return configured, errors.Join(err, cleanupErr)
+	}
+	return nil, err
+}
+
 func (configured *IPv4Route) recordRouteWrite(kind int, err error) {
 	if err != nil {
+		if kind == syscall.RTM_ADD && errors.Is(err, errRouteOutcomeUnknown) {
+			configured.routeSet = true
+		}
 		return
 	}
 	if kind == syscall.RTM_ADD {
@@ -419,24 +435,31 @@ func requestRouteMessage(kind, flags int, addrs []route.Addr) (*route.RouteMessa
 	if err != nil {
 		return nil, err
 	}
-	if _, err := unix.Write(fd, payload); err != nil {
-		return nil, err
-	}
-	buffer := make([]byte, 4096)
-	n, err := unix.Read(fd, buffer)
+	n, err := unix.Write(fd, payload)
 	if err != nil {
 		return nil, err
 	}
+	if n != len(payload) {
+		return nil, fmt.Errorf("%w: partial route request", errRouteOutcomeUnknown)
+	}
+	buffer := make([]byte, 4096)
+	n, err = unix.Read(fd, buffer)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", errRouteOutcomeUnknown, err)
+	}
 	messages, err := route.ParseRIB(route.RIBTypeRoute, buffer[:n])
-	if err != nil || len(messages) != 1 {
-		return nil, fmt.Errorf("invalid route reply: %w", err)
+	if err != nil {
+		return nil, fmt.Errorf("%w: parse route reply: %v", errRouteOutcomeUnknown, err)
+	}
+	if len(messages) != 1 {
+		return nil, fmt.Errorf("%w: invalid route reply count %d", errRouteOutcomeUnknown, len(messages))
 	}
 	result, ok := messages[0].(*route.RouteMessage)
 	if !ok {
-		return nil, errors.New("unexpected route reply type")
+		return nil, fmt.Errorf("%w: unexpected route reply type", errRouteOutcomeUnknown)
 	}
 	if result.ID != uintptr(os.Getpid()) || result.Seq != sequence || result.Type != kind {
-		return nil, fmt.Errorf("unexpected route reply: got type=%d id=%d seq=%d", result.Type, result.ID, result.Seq)
+		return nil, fmt.Errorf("%w: unexpected route reply: got type=%d id=%d seq=%d", errRouteOutcomeUnknown, result.Type, result.ID, result.Seq)
 	}
 	return result, nil
 }

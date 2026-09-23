@@ -83,6 +83,32 @@ func TestSyntheticPhysicalEndpointReadsGatewayAndInterface(t *testing.T) {
 	}
 }
 
+func TestSyntheticPhysicalEndpointRejectsChangedGateway(t *testing.T) {
+	configured := &PhysicalEndpointRoute{
+		gateway: netip.MustParseAddr("192.168.1.1"),
+		iface:   &net.Interface{Index: 7, Name: "en0"},
+	}
+	if !configured.matchesPhysicalGateway(netip.MustParseAddr("192.168.1.1"), &net.Interface{Index: 7, Name: "en0"}) {
+		t.Fatal("did not retain the recorded gateway and interface")
+	}
+	if configured.matchesPhysicalGateway(netip.MustParseAddr("192.168.1.254"), &net.Interface{Index: 7, Name: "en0"}) || configured.matchesPhysicalGateway(netip.MustParseAddr("192.168.1.1"), &net.Interface{Index: 8, Name: "en1"}) {
+		t.Fatal("accepted a changed gateway or interface")
+	}
+}
+
+func TestSyntheticPhysicalEndpointRetainsUnknownAddOutcome(t *testing.T) {
+	configured := &PhysicalEndpointRoute{}
+	configured.recordRouteWrite(syscall.RTM_ADD, errRouteOutcomeUnknown)
+	if !configured.routeSet {
+		t.Fatal("lost route recovery state after an unknown add outcome")
+	}
+	configured = &PhysicalEndpointRoute{}
+	configured.recordRouteWrite(syscall.RTM_ADD, syscall.EEXIST)
+	if configured.routeSet {
+		t.Fatal("retained route recovery state after a kernel-rejected add")
+	}
+}
+
 func physicalRouteMessage(index, flags int, destination, gateway [4]byte, name string) *route.RouteMessage {
 	addrs := make([]route.Addr, syscall.RTAX_IFP+1)
 	addrs[syscall.RTAX_DST] = &route.Inet4Addr{IP: destination}

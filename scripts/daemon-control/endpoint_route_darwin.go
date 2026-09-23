@@ -43,11 +43,17 @@ func configureSyntheticPhysicalEndpointRoute(targetText string) (*PhysicalEndpoi
 	if err != nil {
 		return nil, err
 	}
-	if err := configured.add(); err != nil {
+	if err := configured.validatePhysicalGateway(); err != nil {
 		return nil, err
 	}
+	if err := configured.add(); err != nil {
+		return configured.cleanupFailedRouteAdd(err)
+	}
 	if err := configured.verify(); err != nil {
-		return nil, errors.Join(err, configured.Close())
+		return configured.cleanupFailedRouteAdd(err)
+	}
+	if err := configured.validatePhysicalGateway(); err != nil {
+		return configured.cleanupFailedRouteAdd(err)
 	}
 	return configured, nil
 }
@@ -117,16 +123,61 @@ func (configured *PhysicalEndpointRoute) verify() error {
 func (configured *PhysicalEndpointRoute) write(kind int) error {
 	message, err := requestRouteMessage(kind, syscall.RTF_UP|syscall.RTF_HOST|syscall.RTF_GATEWAY|syscall.RTF_STATIC, configured.routeAddrs())
 	if err != nil {
+		configured.recordRouteWrite(kind, err)
 		return err
 	}
-	if message.Err == nil {
-		configured.routeSet = kind == syscall.RTM_ADD
-	}
+	configured.recordRouteWrite(kind, message.Err)
 	return message.Err
+}
+
+func (configured *PhysicalEndpointRoute) recordRouteWrite(kind int, err error) {
+	if err == nil {
+		configured.routeSet = kind == syscall.RTM_ADD
+	} else if kind == syscall.RTM_ADD && errors.Is(err, errRouteOutcomeUnknown) {
+		configured.routeSet = true
+	}
+}
+
+func (configured *PhysicalEndpointRoute) cleanupFailedRouteAdd(err error) (*PhysicalEndpointRoute, error) {
+	if !configured.routeSet {
+		return nil, err
+	}
+	if cleanupErr := configured.Close(); cleanupErr != nil {
+		return configured, errors.Join(err, cleanupErr)
+	}
+	return nil, err
 }
 
 func (configured *PhysicalEndpointRoute) lookup() (*route.RouteMessage, error) {
 	return requestRouteMessage(syscall.RTM_GET, syscall.RTF_UP|syscall.RTF_HOST, effectiveRouteLookupAddrs(configured.target))
+}
+
+func (configured *PhysicalEndpointRoute) validatePhysicalGateway() error {
+	probe, err := endpointProbe(configured.target)
+	if err != nil {
+		return err
+	}
+	message, err := requestRouteMessage(syscall.RTM_GET, syscall.RTF_UP|syscall.RTF_HOST, effectiveRouteLookupAddrs(probe))
+	if err != nil || message.Err != nil {
+		return errors.Join(err, message.Err)
+	}
+	gateway, iface, err := physicalGateway(message)
+	if err != nil || !configured.matchesPhysicalGateway(gateway, iface) {
+		return errors.New("effective endpoint gateway changed")
+	}
+	return nil
+}
+
+func (configured *PhysicalEndpointRoute) matchesPhysicalGateway(gateway netip.Addr, iface *net.Interface) bool {
+	return iface != nil && gateway == configured.gateway && iface.Index == configured.iface.Index && iface.Name == configured.iface.Name
+}
+
+func endpointProbe(target netip.Addr) (netip.Addr, error) {
+	probe := target.Next()
+	if !probe.IsValid() || !syntheticEndpointPrefix.Contains(probe) {
+		return netip.Addr{}, errors.New("synthetic endpoint has no probe address")
+	}
+	return probe, nil
 }
 
 func (configured *PhysicalEndpointRoute) routeAddrs() []route.Addr {

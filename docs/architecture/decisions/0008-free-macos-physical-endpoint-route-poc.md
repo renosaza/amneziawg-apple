@@ -23,6 +23,10 @@ adding, and again before deletion, it requires the exact target, static host
 route, recorded gateway, and recorded interface to match. It leaves the route
 in place and returns an error when ownership cannot be proven.
 
+It also reads the next TEST-NET-3 address before and after adding the host
+route. That lookup must retain the recorded physical gateway and interface;
+otherwise the POC rolls back only its still-owned host route.
+
 ## Consequences
 
 The workflow sends no traffic. This does not permit real endpoint routing,
