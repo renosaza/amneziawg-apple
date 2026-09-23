@@ -404,13 +404,17 @@ func (configured *IPv4Route) routeLookupAddrs() []route.Addr {
 }
 
 func (configured *IPv4Route) requestWithAddrs(kind int, addrs []route.Addr) (*route.RouteMessage, error) {
+	return requestRouteMessage(kind, syscall.RTF_UP|syscall.RTF_HOST|syscall.RTF_STATIC, addrs)
+}
+
+func requestRouteMessage(kind, flags int, addrs []route.Addr) (*route.RouteMessage, error) {
 	fd, err := unix.Socket(unix.AF_ROUTE, unix.SOCK_RAW, unix.AF_UNSPEC)
 	if err != nil {
 		return nil, err
 	}
 	defer unix.Close(fd)
 	sequence := int(routeSequence.Add(1))
-	message := &route.RouteMessage{Version: syscall.RTM_VERSION, Type: kind, Flags: syscall.RTF_UP | syscall.RTF_HOST | syscall.RTF_STATIC, ID: uintptr(os.Getpid()), Seq: sequence, Addrs: addrs}
+	message := &route.RouteMessage{Version: syscall.RTM_VERSION, Type: kind, Flags: flags, ID: uintptr(os.Getpid()), Seq: sequence, Addrs: addrs}
 	payload, err := message.Marshal()
 	if err != nil {
 		return nil, err
