@@ -128,6 +128,7 @@
 		6F7774E1217181B1006A79B3 /* MainViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F7774DF217181B1006A79B3 /* MainViewController.swift */; };
 		6F7774E2217181B1006A79B3 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F7774E0217181B1006A79B3 /* AppDelegate.swift */; };
 		6F7774E421718281006A79B3 /* TunnelsListTableViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F7774E321718281006A79B3 /* TunnelsListTableViewController.swift */; };
+		7A0000052F00000100000001 /* DaemonControlClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A0000062F00000100000001 /* DaemonControlClient.swift */; };
 		6F7774EF21722D97006A79B3 /* TunnelsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F7774EE21722D97006A79B3 /* TunnelsManager.swift */; };
 		6F7774F321774263006A79B3 /* TunnelEditTableViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F7774F221774263006A79B3 /* TunnelEditTableViewController.swift */; };
 		6F7F7E5F21C7D74B00527607 /* TunnelErrors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F7F7E5E21C7D74B00527607 /* TunnelErrors.swift */; };
@@ -371,6 +372,7 @@
 		6F7774DF217181B1006A79B3 /* MainViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MainViewController.swift; sourceTree = "<group>"; };
 		6F7774E0217181B1006A79B3 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		6F7774E321718281006A79B3 /* TunnelsListTableViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TunnelsListTableViewController.swift; sourceTree = "<group>"; };
+		7A0000062F00000100000001 /* DaemonControlClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonControlClient.swift; sourceTree = "<group>"; };
 		6F7774EE21722D97006A79B3 /* TunnelsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelsManager.swift; sourceTree = "<group>"; };
 		6F7774F221774263006A79B3 /* TunnelEditTableViewController.swift */ = {isa = PBXFileReference; indentWidth = 4; lastKnownFileType = sourcecode.swift; path = TunnelEditTableViewController.swift; sourceTree = "<group>"; tabWidth = 4; };
 		6F7F7E5E21C7D74B00527607 /* TunnelErrors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelErrors.swift; sourceTree = "<group>"; };
@@ -650,6 +652,7 @@
 		6F7774ED21722D0C006A79B3 /* Tunnel */ = {
 			isa = PBXGroup;
 			children = (
+				7A0000062F00000100000001 /* DaemonControlClient.swift */,
 				6F7774EE21722D97006A79B3 /* TunnelsManager.swift */,
 				6B707D8321F918D4000A8F73 /* TunnelConfiguration+UapiConfig.swift */,
 				6FFA5DA32197085D0001E2F7 /* ActivateOnDemandOption.swift */,
@@ -1303,6 +1306,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7A0000052F00000100000001 /* DaemonControlClient.swift in Sources */,
 				58233BD02591F842002060A8 /* NotificationToken.swift in Sources */,
 				6FBA101521D613F90051C35F /* Application.swift in Sources */,
 				6FB1BDCC21D50F5300A991BF /* TunnelsManager.swift in Sources */,
