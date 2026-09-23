@@ -7,6 +7,80 @@ import os
 
 class PacketTunnelProvider: NEPacketTunnelProvider {
 
+    #if os(macOS)
+    // Counts each start attempt until it fails or its stop callback completes,
+    // so the exit(0) workaround cannot terminate a pending start in this process.
+    private static var startedTunnelCount = 0
+    private static let startedTunnelCountLock = NSLock()
+    private var hasStartedTunnel = false
+    private var hasCompletedStart = false
+    private var hasRequestedStop = false
+    private var hasCompletedStop = false
+    private var requiresDeferredStop = false
+
+    private func registerStartedTunnel() {
+        PacketTunnelProvider.startedTunnelCountLock.lock()
+        defer { PacketTunnelProvider.startedTunnelCountLock.unlock() }
+        precondition(!hasStartedTunnel)
+        hasCompletedStart = false
+        hasRequestedStop = false
+        hasCompletedStop = false
+        requiresDeferredStop = false
+        PacketTunnelProvider.startedTunnelCount += 1
+        hasStartedTunnel = true
+    }
+
+    @discardableResult
+    private func completeStart(succeeded: Bool) -> Bool {
+        PacketTunnelProvider.startedTunnelCountLock.lock()
+        defer { PacketTunnelProvider.startedTunnelCountLock.unlock() }
+        guard !hasCompletedStart else { return false }
+        hasCompletedStart = true
+        if !succeeded && (!hasRequestedStop || hasCompletedStop) {
+            unregisterStartedTunnelLocked()
+        } else if succeeded && hasCompletedStop {
+            requiresDeferredStop = true
+            return true
+        }
+        return false
+    }
+
+    private func requestStop() {
+        PacketTunnelProvider.startedTunnelCountLock.lock()
+        hasRequestedStop = true
+        PacketTunnelProvider.startedTunnelCountLock.unlock()
+    }
+
+    @discardableResult
+    private func completeStop() -> Bool {
+        PacketTunnelProvider.startedTunnelCountLock.lock()
+        defer { PacketTunnelProvider.startedTunnelCountLock.unlock() }
+        guard !hasCompletedStop else { return false }
+        hasCompletedStop = true
+        guard hasCompletedStart else { return false }
+        guard hasStartedTunnel else {
+            return PacketTunnelProvider.startedTunnelCount == 0
+        }
+        return unregisterStartedTunnelLocked()
+    }
+
+    @discardableResult
+    private func completeDeferredStop() -> Bool {
+        PacketTunnelProvider.startedTunnelCountLock.lock()
+        defer { PacketTunnelProvider.startedTunnelCountLock.unlock() }
+        guard requiresDeferredStop else { return false }
+        requiresDeferredStop = false
+        return unregisterStartedTunnelLocked()
+    }
+
+    private func unregisterStartedTunnelLocked() -> Bool {
+        guard hasStartedTunnel else { return false }
+        hasStartedTunnel = false
+        PacketTunnelProvider.startedTunnelCount -= 1
+        return PacketTunnelProvider.startedTunnelCount == 0
+    }
+    #endif
+
     private lazy var adapter: WireGuardAdapter = {
         return WireGuardAdapter(with: self) { logLevel, message in
             wg_log(logLevel.osLogLevel, message: message)
@@ -72,9 +146,16 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         wg_log(.info, message: "Starting tunnel from the " + (activationAttemptId == nil ? "OS directly, rather than the app" : "app"))
 
+        #if os(macOS)
+        registerStartedTunnel()
+        #endif
+
         guard let tunnelProviderProtocol = self.protocolConfiguration as? NETunnelProviderProtocol,
               let tunnelConfiguration = tunnelProviderProtocol.asTunnelConfiguration() else {
             errorNotifier.notify(PacketTunnelProviderError.savedProtocolConfigurationIsInvalid)
+            #if os(macOS)
+            completeStart(succeeded: false)
+            #endif
             completionHandler(PacketTunnelProviderError.savedProtocolConfigurationIsInvalid)
             return
         }
@@ -84,6 +165,18 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         // Start the tunnel
         adapter.start(tunnelConfiguration: tunnelConfiguration) { adapterError in
             guard let adapterError = adapterError else {
+                #if os(macOS)
+                if self.completeStart(succeeded: true) {
+                    self.adapter.stop { error in
+                        if let error = error {
+                            wg_log(.error, message: "Failed to stop WireGuard adapter after a cancelled start: \(error.localizedDescription)")
+                        }
+                        if self.completeDeferredStop() {
+                            exit(0)
+                        }
+                    }
+                }
+                #endif
                 let interfaceName = self.adapter.interfaceName ?? "unknown"
 
                 wg_log(.info, message: "Tunnel interface is \(interfaceName)")
@@ -91,6 +184,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 completionHandler(nil)
                 return
             }
+
+            #if os(macOS)
+            self.completeStart(succeeded: false)
+            #endif
 
             switch adapterError {
             case .cannotLocateTunnelFileDescriptor:
@@ -126,6 +223,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         wg_log(.info, message: "Stopping tunnel, reason=\(reason.rawValue) (\(reason))")
 
+        #if os(macOS)
+        requestStop()
+        #endif
+
         adapter.stop { error in
             ErrorNotifier.removeLastErrorFile()
 
@@ -138,7 +239,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             // HACK: This is a filthy hack to work around Apple bug 32073323 (dup'd by us as 47526107).
             // Remove it when they finally fix this upstream and the fix has been rolled out to
             // sufficient quantities of users.
-            exit(0)
+            if self.completeStop() {
+                exit(0)
+            }
             #endif
         }
     }
