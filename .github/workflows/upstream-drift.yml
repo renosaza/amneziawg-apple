@@ -1,0 +1,25 @@
+name: Upstream drift
+
+on:
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-amnezia-base:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Compare recorded base with amnezia/master
+        shell: bash
+        run: |
+          set -euo pipefail
+          recorded_base="$(sed -nE 's/^Current Amnezia upstream base: ([0-9a-f]{40})$/\1/p' docs/UPSTREAM.md)"
+          test -n "$recorded_base"
+          current_base="$(git ls-remote https://github.com/amnezia-vpn/amneziawg-apple.git refs/heads/master | awk '{print $1}')"
+          test -n "$current_base"
+          printf 'Recorded base: %s\nCurrent base: %s\n' "$recorded_base" "$current_base"
+          test "$recorded_base" = "$current_base"
