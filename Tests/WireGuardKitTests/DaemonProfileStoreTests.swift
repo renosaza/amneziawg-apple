@@ -85,10 +85,7 @@ final class DaemonProfileStoreTests: XCTestCase {
         let fixture = try Fixture()
         let id = UUID()
         let config = Self.configuration()
-        fixture.secrets.write(id, .active, Data(config.utf8))
-        let metadata = "{\"profiles\":[{\"id\":\"(id.uuidString.lowercased())\",\"name\":\"Committed\"}]}"
-        try Data(metadata.utf8).write(to: fixture.metadataURL)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fixture.metadataURL.path)
+        try fixture.store.save(id: id, name: "Committed", wgQuickConfig: config)
         let journal = """
         {"operation":"save","phase":"staged","id":"\(id.uuidString.lowercased())","name":"Committed"}
         """
