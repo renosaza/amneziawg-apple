@@ -39,6 +39,15 @@ type device struct {
 	explicitRoute               bool
 }
 
+type routeState struct {
+	interfaceName, gateway, flags string
+}
+
+type baseline struct {
+	interfaces map[string]bool
+	routes     map[string]routeState
+}
+
 func key(label string) (string, string, error) {
 	seed := sha256.Sum256([]byte("amneziawg-apple-utun-poc:" + label))
 	private, err := ecdh.X25519().NewPrivateKey(seed[:])
@@ -86,20 +95,59 @@ func output(ctx context.Context, path string, args ...string) (string, error) {
 	return string(result), nil
 }
 
-func checkIdle(ctx context.Context) error {
-	interfaces, err := output(ctx, "/sbin/ifconfig", "-l")
-	if err != nil {
-		return err
-	}
-	for _, name := range strings.Fields(interfaces) {
-		if strings.HasPrefix(name, "utun") {
-			return fmt.Errorf("existing %s found; use an idle runner", name)
+func routeField(output, key string) string {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if value, found := strings.CutPrefix(line, key+":"); found {
+			return strings.TrimSpace(value)
 		}
 	}
-	return nil
+	return ""
 }
 
-func start(ctx context.Context, binary, directory string, d *device) error {
+func currentRoute(ctx context.Context, address string) (routeState, error) {
+	result, err := output(ctx, "/sbin/route", "-n", "get", address)
+	if err != nil {
+		return routeState{}, err
+	}
+	return routeState{interfaceName: routeField(result, "interface"), gateway: routeField(result, "gateway"), flags: routeField(result, "flags")}, nil
+}
+
+func testAddresses(devices []*device) []string {
+	addresses := make([]string, 0, len(devices))
+	for _, d := range devices {
+		addresses = append(addresses, d.address)
+	}
+	return addresses
+}
+
+func routeAllowed(route routeState) bool {
+	return !strings.HasPrefix(route.interfaceName, "utun") && !strings.Contains(route.flags, "HOST")
+}
+
+func captureBaseline(ctx context.Context, devices []*device) (baseline, error) {
+	interfaces, err := output(ctx, "/sbin/ifconfig", "-l")
+	if err != nil {
+		return baseline{}, err
+	}
+	state := baseline{interfaces: make(map[string]bool), routes: make(map[string]routeState)}
+	for _, name := range strings.Fields(interfaces) {
+		state.interfaces[name] = true
+	}
+	for _, address := range testAddresses(devices) {
+		route, err := currentRoute(ctx, address)
+		if err != nil {
+			return baseline{}, err
+		}
+		if !routeAllowed(route) {
+			return baseline{}, fmt.Errorf("test destination %s already has a conflicting route via %s", address, route.interfaceName)
+		}
+		state.routes[address] = route
+	}
+	return state, nil
+}
+
+func start(ctx context.Context, binary, directory string, d *device, state baseline, claimed map[string]bool) error {
 	nameFile := filepath.Join(directory, d.label+".name")
 	d.cmd = exec.Command(binary, "-f", "utun")
 	d.cmd.Env = append(os.Environ(), "WG_TUN_NAME_FILE="+nameFile, "LOG_LEVEL=error")
@@ -116,8 +164,12 @@ func start(ctx context.Context, binary, directory string, d *device) error {
 			if !utunName.MatchString(d.name) {
 				return fmt.Errorf("%s reported invalid interface %q", d.label, d.name)
 			}
+			if state.interfaces[d.name] || claimed[d.name] {
+				return fmt.Errorf("%s claimed baseline or duplicate interface %s", d.label, d.name)
+			}
 			if _, err := os.Stat(filepath.Join(uapiDir, d.name+".sock")); err == nil {
 				if _, err := uapi(d.name, "get=1"); err == nil {
+					claimed[d.name] = true
 					return nil
 				}
 			}
@@ -182,8 +234,8 @@ func configure(server, client *device) error {
 }
 
 func routeUses(ctx context.Context, address, name string) bool {
-	result, err := output(ctx, "/sbin/route", "-n", "get", address)
-	return err == nil && strings.Contains(result, "interface: "+name)
+	route, err := currentRoute(ctx, address)
+	return err == nil && route.interfaceName == name
 }
 
 func configureInterface(ctx context.Context, d *device) error {
@@ -221,7 +273,33 @@ func verify(d *device) error {
 	return nil
 }
 
-func stop(ctx context.Context, devices []*device, directory string) error {
+func verifyBaseline(ctx context.Context, state baseline) error {
+	interfaces, err := output(ctx, "/sbin/ifconfig", "-l")
+	if err != nil {
+		return err
+	}
+	currentInterfaces := make(map[string]bool)
+	for _, name := range strings.Fields(interfaces) {
+		currentInterfaces[name] = true
+	}
+	for name := range state.interfaces {
+		if !currentInterfaces[name] {
+			return fmt.Errorf("baseline interface %s disappeared", name)
+		}
+	}
+	for address, expected := range state.routes {
+		actual, err := currentRoute(ctx, address)
+		if err != nil {
+			return err
+		}
+		if actual != expected {
+			return fmt.Errorf("baseline route changed for %s", address)
+		}
+	}
+	return nil
+}
+
+func stop(ctx context.Context, devices []*device, directory string, state baseline) error {
 	var cleanupErrors []error
 	for _, d := range devices {
 		if d.explicitRoute {
@@ -267,6 +345,9 @@ func stop(ctx context.Context, devices []*device, directory string) error {
 		_ = os.Remove(filepath.Join(directory, d.label+".name"))
 	}
 	_ = os.Remove(directory)
+	if err := verifyBaseline(ctx, state); err != nil {
+		cleanupErrors = append(cleanupErrors, err)
+	}
 	return errors.Join(cleanupErrors...)
 }
 
@@ -286,6 +367,9 @@ func selfCheck() error {
 		}
 		keys[d.publicKey], addresses[d.address] = true, true
 	}
+	if !routeAllowed(routeState{interfaceName: "en0", flags: "<UP,GATEWAY>"}) || routeAllowed(routeState{interfaceName: "utun0"}) || routeAllowed(routeState{flags: "<UP,HOST>"}) {
+		return fmt.Errorf("route collision guard failed")
+	}
 	fields, err := parseReply("rx_bytes=42\ntx_bytes=42\nlast_handshake_time_sec=1\nerrno=0\n")
 	if err != nil {
 		return err
@@ -302,10 +386,11 @@ func selfCheck() error {
 }
 
 func runProof(ctx context.Context, binary string) (err error) {
-	if err := checkIdle(ctx); err != nil {
+	devices, err := topology()
+	if err != nil {
 		return err
 	}
-	devices, err := topology()
+	state, err := captureBaseline(ctx, devices)
 	if err != nil {
 		return err
 	}
@@ -317,9 +402,10 @@ func runProof(ctx context.Context, binary string) (err error) {
 		_ = os.Remove(directory)
 		return err
 	}
-	defer func() { err = errors.Join(err, stop(context.Background(), devices, directory)) }()
+	defer func() { err = errors.Join(err, stop(context.Background(), devices, directory, state)) }()
+	claimed := make(map[string]bool)
 	for _, d := range devices {
-		if err := start(ctx, binary, directory, d); err != nil {
+		if err := start(ctx, binary, directory, d, state, claimed); err != nil {
 			return err
 		}
 	}

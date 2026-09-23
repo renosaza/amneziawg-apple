@@ -11,8 +11,10 @@ or modify the application GUI. It is not a distribution-ready VPN client.
 
 ## Local invocation
 
-Use only an idle disposable Mac. The harness fails before creating any device
-when any existing `utun` interface is present.
+Use only a disposable Mac. The harness records existing interfaces and routes
+before creating anything. It refuses a test destination already routed through
+`utun` or an existing host route, and later verifies that the recorded baseline
+interfaces and test-destination routes are unchanged.
 
 ```sh
 mkdir -p out
@@ -35,5 +37,6 @@ it on a Mac with a real VPN.
 `.github/workflows/utun-poc.yml` runs only by manual dispatch after reviewed
 code has been merged to the default branch. It builds the pinned backend, runs
 the no-network self-check, then runs the proof with `sudo` on a fresh GitHub
-macOS runner. A pre-existing `utun` causes a failure before any change. No CI
-run has been recorded from this branch yet.
+macOS runner. Existing unrelated `utun` interfaces are preserved; a route
+collision on a test destination causes a failure before any change. No CI run
+has been recorded from this branch yet.

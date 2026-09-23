@@ -18,10 +18,11 @@ separate no-fee path before any production architecture decision.
 
 Maintain branch-local POCs for three foreground `amneziawg-go -f utun`
 processes and for three synthetic loopback pairs. They record kernel-assigned
-`utun` names and UAPI sockets, refuse hosts with pre-existing `utun` devices,
-and use no user profile, default route, DNS, PF, or GUI operation. The traffic
-proof may install only its TEST-NET `/32` peer routes and cleans up those exact
-routes before stopping its own child processes.
+`utun` names and UAPI sockets, record existing interfaces and test-destination
+routes, and use no user profile, default route, DNS, PF, or GUI operation. The
+traffic proof may install only its TEST-NET `/32` peer routes and cleans up
+those exact routes before stopping its own child processes. It rejects a test
+destination that is already a host route or routes through a baseline `utun`.
 
 ## Consequences
 
