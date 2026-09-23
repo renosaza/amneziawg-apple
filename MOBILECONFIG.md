@@ -112,7 +112,7 @@ Here's an example WireGuard configuration payload dictionary:
         <key>WgQuickConfig</key>
         <string>
         [Interface]
-        PrivateKey = mInDaw06K0NgfULRObHJjkWD3ahUC8XC1tVjIf6W+Vo=
+        PrivateKey = <REDACTED>
         Address = 10.10.1.0/24
         DNS = 1.1.1.1, 1.0.0.1
 

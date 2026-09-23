@@ -2,6 +2,9 @@
 #
 # gitignore contributors: remember to update Global/Xcode.gitignore, Objective-C.gitignore & Swift.gitignore
 
+# Local signing identity and bundle identifiers; copy Developer.xcconfig.template.
+Sources/WireGuardApp/Config/Developer.xcconfig
+
 .DS_Store
 .idea
 
