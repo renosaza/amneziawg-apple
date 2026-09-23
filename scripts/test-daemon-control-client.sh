@@ -8,6 +8,7 @@ trap 'rm -rf "$daemon_client_temp_dir"' EXIT
 
 swiftc \
     "$repo_dir/Sources/WireGuardApp/Tunnel/DaemonControlClient.swift" \
+    "$repo_dir/Sources/WireGuardApp/Tunnel/DaemonTunnelState.swift" \
     "$repo_dir/scripts/daemon-control/client_selftest.swift" \
     -o "$daemon_client_temp_dir/daemon-control-client-selftest"
 "$daemon_client_temp_dir/daemon-control-client-selftest"

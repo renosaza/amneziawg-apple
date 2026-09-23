@@ -10,6 +10,7 @@ struct DaemonControlClientSelfTest {
             try testFraming()
             try testSocketTransport()
             try testResponses()
+            try testDaemonTunnelState()
             try testLifecycleProtocol()
             print("daemon-control Swift client self-check passed")
         } catch {
@@ -66,6 +67,31 @@ struct DaemonControlClientSelfTest {
         try DaemonControlProtocol.writeFrame(response, to: descriptors[1], deadline: deadline)
         let received = try DaemonControlProtocol.readFrame(from: descriptors[0], deadline: deadline)
         try expect(received == response)
+    }
+
+    private static func testDaemonTunnelState() throws {
+        let profileID = UUID(uuidString: "11111111-2222-4333-8444-555555555555")!
+        let otherProfileID = UUID(uuidString: "22222222-2222-4333-8444-555555555555")!
+
+        try expect(DaemonTunnelState.current(for: profileID, statuses: []) == .inactive)
+        try expect(
+            DaemonTunnelState.current(
+                for: profileID,
+                statuses: [DaemonControlProfileStatus(id: profileID, state: .running)]
+            ) == .running
+        )
+        try expect(
+            DaemonTunnelState.current(
+                for: profileID,
+                statuses: [DaemonControlProfileStatus(id: otherProfileID, state: .degraded)]
+            ) == .inactive
+        )
+        try expect(
+            DaemonTunnelState.current(
+                for: profileID,
+                statuses: [DaemonControlProfileStatus(id: profileID, state: .degraded)]
+            ) == .degraded
+        )
     }
 
     private static func testLifecycleProtocol() throws {
