@@ -3,8 +3,7 @@
 // You Apple developer account's Team ID
 DEVELOPMENT_TEAM = <team_id>
 
-// The bundle identifier of the apps.
-// Should be an app id created at developer.apple.com
-// with Network Extensions capabilty.
+// The bundle identifier of the apps. Register the macOS app ID and its
+// Network Extension capability at developer.apple.com.
 APP_ID_IOS = <app_id>
-APP_ID_MACOS = <app_id>
+APP_ID_MACOS = com.renosaza.amneziawg
