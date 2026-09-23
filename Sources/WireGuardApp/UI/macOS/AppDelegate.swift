@@ -2,6 +2,7 @@
 // Copyright © 2018-2023 WireGuard LLC. All Rights Reserved.
 
 import Cocoa
+import Darwin
 import ServiceManagement
 
 @NSApplicationMain
@@ -28,6 +29,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         #if DAEMON_MODE
             Logger.configureGlobal(tagged: "APP", withFilePath: nil)
+            if ProcessInfo.processInfo.arguments.contains("--daemon-self-check") {
+                DaemonTunnelsManager.createDaemon { result in
+                    guard case .success(let tunnelsManager) = result, tunnelsManager.numberOfTunnels() == 0 else {
+                        exit(EXIT_FAILURE)
+                    }
+                    exit(EXIT_SUCCESS)
+                }
+                return
+            }
         #else
         Logger.configureGlobal(tagged: "APP", withFilePath: FileManager.logFileURL?.path)
         registerLoginItem(shouldLaunchAtLogin: true)

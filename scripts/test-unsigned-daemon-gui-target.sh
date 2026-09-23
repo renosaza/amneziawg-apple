@@ -28,5 +28,6 @@ if grep -Eq 'NETunnelProviderManager|sendProviderMessage|DaemonControlClient.*\.
     exit 1
 fi
 grep -Eq 'DaemonControlClient\(socketPath: controlSocketPath\)\.list\(\)' "$manager"
+grep -Eq -- '--daemon-self-check' "$repo_dir/Sources/WireGuardApp/UI/macOS/AppDelegate.swift"
 
 echo "unsigned daemon GUI target self-check passed"
