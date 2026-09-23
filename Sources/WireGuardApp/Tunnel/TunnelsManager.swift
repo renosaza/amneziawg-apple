@@ -54,7 +54,7 @@ class TunnelsManager {
     #endif
     private var configurationsObservationToken: NotificationToken?
 
-    init(tunnelProviders: [NETunnelProviderManager]) {
+    convenience init(tunnelProviders: [NETunnelProviderManager]) {
         self.init(
             tunnels: tunnelProviders.map { TunnelContainer(tunnel: $0) },
             observesNetworkExtension: true
