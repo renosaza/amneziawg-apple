@@ -308,6 +308,21 @@ func TestConfigAllowsAWGFields(t *testing.T) {
 	}
 }
 
+func TestConfigAllowsOneTrailingNewline(t *testing.T) {
+	if err := validConfig("private_key=synthetic\n"); err != nil {
+		t.Fatalf("single trailing newline was rejected: %v", err)
+	}
+	for _, config := range []string{
+		"private_key=synthetic\n\n",
+		"private_key=synthetic\n\n\n",
+		"private_key=synthetic\n\npublic_key=synthetic",
+	} {
+		if err := validConfig(config); err == nil {
+			t.Fatalf("blank config line was accepted: %q", config)
+		}
+	}
+}
+
 func TestRejectsUnauthorizedUIDBeforeRequest(t *testing.T) {
 	server, err := NewServer(501)
 	if err != nil {

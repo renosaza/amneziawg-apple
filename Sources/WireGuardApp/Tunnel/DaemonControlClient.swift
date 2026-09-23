@@ -17,14 +17,14 @@ struct DaemonControlProfileStatus: Equatable {
 enum DaemonControlClientError: Error, Equatable {
     case invalidSocketPath
     case invalidTimeout
+    case invalidConfiguration
     case connectionFailed
     case timedOut
     case invalidResponse
     case daemonRejected
 }
 
-/// Read-only client for the version 1 daemon-control POC protocol.
-/// It deliberately cannot send profile configuration or lifecycle commands.
+/// macOS client for the version 1 daemon-control POC protocol.
 final class DaemonControlClient {
     private let socketPath: String
     private let timeout: TimeInterval
@@ -46,30 +46,57 @@ final class DaemonControlClient {
         try DaemonControlProtocol.decodeStatusResponse(request(operation: "status", profileID: profileID), expectedProfileID: profileID)
     }
 
-    private func request(operation: String, profileID: UUID?) throws -> Data {
+    func start(profileID: UUID, uapiConfiguration: String) throws -> DaemonControlProfileStatus {
+        let response = try request(operation: "start", profileID: profileID, uapiConfiguration: uapiConfiguration)
+        return try DaemonControlProtocol.decodeStartResponse(response, expectedProfileID: profileID)
+    }
+
+    func stop(profileID: UUID) throws {
+        let response = try request(operation: "stop", profileID: profileID)
+        try DaemonControlProtocol.decodeStopResponse(response, expectedProfileID: profileID)
+    }
+
+    private func request(operation: String, profileID: UUID?, uapiConfiguration: String? = nil) throws -> Data {
         let deadline = DaemonControlProtocol.deadline(after: timeout)
         let descriptor = try DaemonControlProtocol.connect(path: socketPath, deadline: deadline)
         defer { _ = Darwin.close(descriptor) }
 
-        let request = try DaemonControlProtocol.makeRequest(operation: operation, profileID: profileID)
-        try DaemonControlProtocol.writeFrame(request, to: descriptor, deadline: deadline)
+        var request = try DaemonControlProtocol.makeRequest(
+            operation: operation,
+            profileID: profileID,
+            uapiConfiguration: uapiConfiguration
+        )
+        defer {
+            if uapiConfiguration != nil {
+                DaemonControlProtocol.erase(&request)
+            }
+        }
+        try DaemonControlProtocol.writeFrame(
+            request,
+            to: descriptor,
+            deadline: deadline,
+            sensitive: uapiConfiguration != nil
+        )
         return try DaemonControlProtocol.readFrame(from: descriptor, deadline: deadline)
     }
 }
 
 enum DaemonControlProtocol {
     static let maximumFrameBytes = 4 * 1024
+    static let maximumConfigurationBytes = 2 * 1024
     private static let maximumSocketPathBytes = 103
 
     private struct Request: Encodable {
         let version = 1
         let operation: String
         let profileID: String?
+        let config: String?
 
         enum CodingKeys: String, CodingKey {
             case version
             case operation
             case profileID = "profile_id"
+            case config
         }
     }
 
@@ -100,8 +127,21 @@ enum DaemonControlProtocol {
         }
     }
 
-    static func makeRequest(operation: String, profileID: UUID?) throws -> Data {
-        let data = try JSONEncoder().encode(Request(operation: operation, profileID: profileID?.uuidString.lowercased()))
+    static func makeRequest(operation: String, profileID: UUID?, uapiConfiguration: String? = nil) throws -> Data {
+        if let uapiConfiguration = uapiConfiguration {
+            guard !uapiConfiguration.isEmpty,
+                  uapiConfiguration.utf8.count <= maximumConfigurationBytes,
+                  !uapiConfiguration.contains("\0"),
+                  !uapiConfiguration.contains("\r")
+            else {
+                throw DaemonControlClientError.invalidConfiguration
+            }
+        }
+        let data = try JSONEncoder().encode(Request(
+            operation: operation,
+            profileID: profileID?.uuidString.lowercased(),
+            config: uapiConfiguration
+        ))
         guard !data.isEmpty, data.count <= maximumFrameBytes else {
             throw DaemonControlClientError.invalidResponse
         }
@@ -126,15 +166,50 @@ enum DaemonControlProtocol {
     }
 
     static func decodeStatusResponse(_ data: Data, expectedProfileID: UUID) throws -> DaemonControlProfileStatus {
-        let response = try decodeResponse(data)
-        guard response.ok, response.error == nil, response.profiles == nil, let profile = response.profile else {
-            throw DaemonControlClientError.daemonRejected
+        let status = try decodeRunningResponse(data, expectedProfileID: expectedProfileID)
+        return status
+    }
+
+    static func decodeStartResponse(_ data: Data, expectedProfileID: UUID) throws -> DaemonControlProfileStatus {
+        let status = try decodeRunningResponse(data, expectedProfileID: expectedProfileID)
+        return status
+    }
+
+    static func decodeStopResponse(_ data: Data, expectedProfileID: UUID) throws {
+        let profile = try decodeProfileResponse(data, expectedProfileID: expectedProfileID)
+        guard profile.status == "stopped" else {
+            throw DaemonControlClientError.invalidResponse
         }
+    }
+
+    static func erase(_ data: inout Data) {
+        // Best effort only: Swift and JSONEncoder may retain independent copies.
+        guard !data.isEmpty else { return }
+        data.resetBytes(in: 0 ..< data.count)
+    }
+
+    private static func decodeRunningResponse(_ data: Data, expectedProfileID: UUID) throws -> DaemonControlProfileStatus {
+        let profile = try decodeProfileResponse(data, expectedProfileID: expectedProfileID)
         let status = try decodeProfile(profile)
         guard status.id == expectedProfileID else {
             throw DaemonControlClientError.invalidResponse
         }
+        guard status.state == .running else {
+            throw DaemonControlClientError.invalidResponse
+        }
         return status
+    }
+
+    private static func decodeProfileResponse(_ data: Data, expectedProfileID: UUID) throws -> Profile {
+        let response = try decodeResponse(data)
+        guard response.ok else { throw DaemonControlClientError.daemonRejected }
+        guard response.error == nil, response.profiles == nil, let profile = response.profile else {
+            throw DaemonControlClientError.invalidResponse
+        }
+        guard UUID(uuidString: profile.id.lowercased()) == expectedProfileID else {
+            throw DaemonControlClientError.invalidResponse
+        }
+        return profile
     }
 
     static func frame(_ body: Data) throws -> Data {
@@ -200,8 +275,14 @@ enum DaemonControlProtocol {
         }
     }
 
-    static func writeFrame(_ body: Data, to descriptor: Int32, deadline: UInt64) throws {
-        try writeAll(try frame(body), to: descriptor, deadline: deadline)
+    static func writeFrame(_ body: Data, to descriptor: Int32, deadline: UInt64, sensitive: Bool = false) throws {
+        var framed = try frame(body)
+        defer {
+            if sensitive {
+                erase(&framed)
+            }
+        }
+        try writeAll(framed, to: descriptor, deadline: deadline)
     }
 
     static func readFrame(from descriptor: Int32, deadline: UInt64) throws -> Data {
