@@ -27,6 +27,20 @@ func TestSyntheticPhysicalEndpointValidation(t *testing.T) {
 	}
 }
 
+func TestSyntheticEndpointRouteTargetsAreDistinct(t *testing.T) {
+	if len(syntheticEndpointRouteTargets) != len(syntheticIPv4RouteSpecs) {
+		t.Fatal("synthetic endpoint routes do not match tunnel slot capacity")
+	}
+	seen := make(map[string]bool)
+	for _, target := range syntheticEndpointRouteTargets {
+		endpoint, err := syntheticEndpoint(target)
+		if err != nil || seen[endpoint.String()] {
+			t.Fatalf("invalid or duplicate endpoint target: %s", target)
+		}
+		seen[endpoint.String()] = true
+	}
+}
+
 func TestSyntheticPhysicalEndpointOwnership(t *testing.T) {
 	configured := &PhysicalEndpointRoute{
 		target:  netip.MustParseAddr("203.0.113.10"),

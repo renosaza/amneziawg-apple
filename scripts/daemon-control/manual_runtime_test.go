@@ -14,7 +14,9 @@ func newTunnelBackendForManualRuntime(binary string) (Backend, error) {
 	if err != nil {
 		return nil, err
 	}
-	backend.(*tunnelBackend).syntheticIPv4Routes = true
+	configured := backend.(*tunnelBackend)
+	configured.syntheticIPv4Routes = true
+	configured.syntheticEndpointRoutes = true
 	return backend, nil
 }
 
@@ -53,27 +55,39 @@ func TestManualSyntheticThreeTunnelLifecycle(t *testing.T) {
 			t.Fatalf("status %s failed: %#v", profile.id, status)
 		}
 	}
-	targets := make(map[string]bool)
+	routeTargets := make(map[string]bool)
+	endpointTargets := make(map[string]bool)
 	for _, profile := range profiles {
 		process, ok := server.profiles[profile.id].value.(*tunnelProcess)
-		if !ok || process.route == nil {
+		if !ok || process.route == nil || process.endpointRoute == nil {
 			t.Fatalf("missing owned synthetic route for %s", profile.id)
 		}
 		if err := process.route.verify(); err != nil {
 			t.Fatal(err)
 		}
-		if targets[process.route.target.String()] {
+		if err := process.endpointRoute.verify(); err != nil {
+			t.Fatal(err)
+		}
+		if routeTargets[process.route.target.String()] {
 			t.Fatal("synthetic routes share a target")
 		}
-		targets[process.route.target.String()] = true
-		t.Logf("owned synthetic route target=%s interface=%s index=%d", process.route.target, process.route.name, process.route.iface.Index)
+		routeTargets[process.route.target.String()] = true
+		if endpointTargets[process.endpointRoute.target.String()] {
+			t.Fatal("synthetic endpoint routes share a target")
+		}
+		endpointTargets[process.endpointRoute.target.String()] = true
+		t.Logf("owned synthetic route target=%s interface=%s index=%d endpoint=%s physical=%s", process.route.target, process.route.name, process.route.iface.Index, process.endpointRoute.target, process.endpointRoute.iface.Name)
 	}
 	middle := server.profiles[profileIDTwo].value.(*tunnelProcess)
 	middleRoute := middle.route
+	middleEndpointRoute := middle.endpointRoute
 	if stopped := server.apply(request{Operation: "stop", ProfileID: profileIDTwo}); !stopped.OK {
 		t.Fatalf("stop middle tunnel failed: %#v", stopped)
 	}
 	if err := middleRoute.proveAbsentAfterTunnelExit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := middleEndpointRoute.proveAbsent(); err != nil {
 		t.Fatal(err)
 	}
 	for _, profile := range []struct{ id string }{{profileID}, {profileIDThree}} {
@@ -84,16 +98,22 @@ func TestManualSyntheticThreeTunnelLifecycle(t *testing.T) {
 		if err := process.route.verify(); err != nil {
 			t.Fatal(err)
 		}
+		if err := process.endpointRoute.verify(); err != nil {
+			t.Fatal(err)
+		}
 	}
 	const replacementID = "44444444-2222-4333-8444-555555555555"
 	if started := server.apply(request{Operation: "start", ProfileID: replacementID, Config: "private_key=0404040404040404040404040404040404040404040404040404040404040404"}); !started.OK {
 		t.Fatalf("replacement start failed: %#v", started)
 	}
 	replacement := server.profiles[replacementID].value.(*tunnelProcess)
-	if replacement.route == nil || replacement.route.target != middleRoute.target {
+	if replacement.route == nil || replacement.endpointRoute == nil || replacement.route.target != middleRoute.target || replacement.endpointRoute.target != middleEndpointRoute.target {
 		t.Fatal("stopped session route slot was not reused")
 	}
 	if err := replacement.route.verify(); err != nil {
+		t.Fatal(err)
+	}
+	if err := replacement.endpointRoute.verify(); err != nil {
 		t.Fatal(err)
 	}
 }

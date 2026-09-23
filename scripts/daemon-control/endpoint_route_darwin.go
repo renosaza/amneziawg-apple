@@ -134,6 +134,24 @@ func (configured *PhysicalEndpointRoute) verify() error {
 	return nil
 }
 
+func (configured *PhysicalEndpointRoute) proveAbsent() error {
+	message, err := configured.lookup()
+	if err != nil {
+		return err
+	}
+	if message == nil {
+		return errors.New("synthetic endpoint route lookup returned no message")
+	}
+	if message.Err != nil {
+		return message.Err
+	}
+	if configured.isTargetHostRoute(message) {
+		return errors.New("synthetic endpoint route remains after cleanup")
+	}
+	configured.routeSet = false
+	return nil
+}
+
 func (configured *PhysicalEndpointRoute) write(kind int) error {
 	message, err := requestRouteMessage(kind, syscall.RTF_UP|syscall.RTF_HOST|syscall.RTF_GATEWAY|syscall.RTF_STATIC, configured.routeAddrs())
 	if err != nil {

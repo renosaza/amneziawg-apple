@@ -32,20 +32,24 @@ var syntheticIPv4RouteSpecs = [...]syntheticIPv4RouteSpec{
 	{local: "192.0.2.6", peer: "192.0.2.5", target: "192.0.2.12"},
 }
 
+var syntheticEndpointRouteTargets = [...]string{"203.0.113.10", "203.0.113.11", "203.0.113.12"}
+
 type tunnelBackend struct {
-	binary              string
-	syntheticIPv4Routes bool
-	routesMu            sync.Mutex
-	routeSlots          [len(syntheticIPv4RouteSpecs)]bool
+	binary                  string
+	syntheticIPv4Routes     bool
+	syntheticEndpointRoutes bool
+	routesMu                sync.Mutex
+	routeSlots              [len(syntheticIPv4RouteSpecs)]bool
 }
 type tunnelProcess struct {
-	command   *exec.Cmd
-	done      <-chan struct{}
-	dir       string
-	name      string
-	baseline  map[string]bool
-	route     *IPv4Route
-	routeSlot int
+	command       *exec.Cmd
+	done          <-chan struct{}
+	dir           string
+	name          string
+	baseline      map[string]bool
+	route         *IPv4Route
+	endpointRoute *PhysicalEndpointRoute
+	routeSlot     int
 }
 
 func newTunnelBackend(binary string) (Backend, error) {
@@ -114,6 +118,9 @@ func (backend *tunnelBackend) Start(config string) (Session, error) {
 	if err == nil && backend.syntheticIPv4Routes {
 		err = backend.configureSyntheticIPv4Route(process)
 	}
+	if err == nil && backend.syntheticEndpointRoutes {
+		err = backend.configureSyntheticEndpointRoute(process)
+	}
 	if err != nil {
 		if cleanupErr := backend.Stop(Session{value: process}); cleanupErr != nil {
 			return Session{value: process}, errors.Join(err, cleanupErr)
@@ -143,6 +150,9 @@ func (backend *tunnelBackend) Stop(session Session) error {
 	}
 	select {
 	case <-process.done:
+		if err := process.closeEndpointRoute(); err != nil {
+			return err
+		}
 		if process.route != nil {
 			if err := process.route.proveAbsentAfterTunnelExit(); err != nil {
 				return err
@@ -150,6 +160,9 @@ func (backend *tunnelBackend) Stop(session Session) error {
 			process.route = nil
 		}
 	default:
+		if err := process.closeEndpointRoute(); err != nil {
+			return err
+		}
 		if process.route != nil {
 			if err := process.route.Close(); err != nil {
 				return err
@@ -181,6 +194,17 @@ func (backend *tunnelBackend) Stop(session Session) error {
 	return nil
 }
 
+func (process *tunnelProcess) closeEndpointRoute() error {
+	if process.endpointRoute == nil {
+		return nil
+	}
+	if err := process.endpointRoute.Close(); err != nil {
+		return err
+	}
+	process.endpointRoute = nil
+	return nil
+}
+
 func (backend *tunnelBackend) configureSyntheticIPv4Route(process *tunnelProcess) error {
 	backend.routesMu.Lock()
 	defer backend.routesMu.Unlock()
@@ -196,6 +220,15 @@ func (backend *tunnelBackend) configureSyntheticIPv4Route(process *tunnelProcess
 		return err
 	}
 	return errors.New("synthetic IPv4 route capacity reached")
+}
+
+func (backend *tunnelBackend) configureSyntheticEndpointRoute(process *tunnelProcess) error {
+	if process.routeSlot < 0 || process.routeSlot >= len(syntheticEndpointRouteTargets) {
+		return errors.New("synthetic endpoint route requires an owned tunnel slot")
+	}
+	route, err := configureSyntheticPhysicalEndpointRoute(syntheticEndpointRouteTargets[process.routeSlot])
+	process.endpointRoute = route
+	return err
 }
 
 func (backend *tunnelBackend) releaseRouteSlot(process *tunnelProcess) {
