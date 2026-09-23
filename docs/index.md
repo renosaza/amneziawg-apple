@@ -11,5 +11,6 @@
 - [Upstream state](UPSTREAM.md): recorded Amnezia base and WireGuard reference.
 - [Runtime validation](work/runtime-validation.md): actual local runtime-check status and pending matrix.
 - [Free macOS `utun` POC](guides/free-macos-utun-poc.md): synthetic-only CLI experiment.
+- [Synthetic `utun` traffic POC](guides/free-macos-utun-traffic-poc.md): manual disposable-runner proof.
 
 Current task status belongs in the repository's GitHub issues and pull requests. This directory records durable constraints and verified procedures only.

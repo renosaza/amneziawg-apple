@@ -1,0 +1,26 @@
+name: Synthetic utun POC
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  traffic:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: Sources/WireGuardKitGo/go.mod
+          cache-dependency-path: Sources/WireGuardKitGo/go.sum
+      - name: Run synthetic traffic proof on the disposable runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          go build -C Sources/WireGuardKitGo -o ../../out/amneziawg-go github.com/amnezia-vpn/amneziawg-go/v3
+          scripts/test-utun-poc-traffic.sh
+          sudo out/utun-poc-traffic -binary "$GITHUB_WORKSPACE/out/amneziawg-go"

@@ -16,10 +16,12 @@ separate no-fee path before any production architecture decision.
 
 ## Decision
 
-Maintain a branch-local POC that starts three empty foreground
-`amneziawg-go -f utun` processes. It records each process's kernel-assigned
-`utun` name and UAPI socket, refuses hosts with pre-existing `utun` devices,
-and performs no profile, address, route, DNS, PF, or GUI operation.
+Maintain branch-local POCs for three foreground `amneziawg-go -f utun`
+processes and for three synthetic loopback pairs. They record kernel-assigned
+`utun` names and UAPI sockets, refuse hosts with pre-existing `utun` devices,
+and use no user profile, default route, DNS, PF, or GUI operation. The traffic
+proof may install only its TEST-NET `/32` peer routes and cleans up those exact
+routes before stopping its own child processes.
 
 ## Consequences
 
