@@ -139,6 +139,28 @@ func TestStartStopStatusAndList(t *testing.T) {
 	}
 }
 
+func TestQuiesceRejectsActiveSessionsAndBlocksNewOnSuccess(t *testing.T) {
+	server, err := NewServerWithBackend(501, &fakeBackend{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response := server.apply(request{Operation: "start", ProfileID: profileID, Config: syntheticConfig}); !response.OK {
+		t.Fatalf("start: %#v", response)
+	}
+	if response := server.apply(request{Operation: "quiesce"}); response.Error != "active_sessions" {
+		t.Fatalf("active quiesce: %#v", response)
+	}
+	if response := server.apply(request{Operation: "stop", ProfileID: profileID}); !response.OK {
+		t.Fatalf("stop: %#v", response)
+	}
+	if response := server.apply(request{Operation: "quiesce"}); !response.OK {
+		t.Fatalf("idle quiesce: %#v", response)
+	}
+	if response := server.apply(request{Operation: "start", ProfileID: profileID, Config: syntheticConfig}); response.Error != "shutting_down" {
+		t.Fatalf("start after quiesce: %#v", response)
+	}
+}
+
 func TestThreeProfilesRemainIndependent(t *testing.T) {
 	backend := &fakeBackend{}
 	server, err := NewServerWithBackend(501, backend)
