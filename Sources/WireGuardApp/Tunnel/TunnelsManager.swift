@@ -45,7 +45,7 @@ protocol TunnelsManagerActivationDelegate: AnyObject {
 }
 
 class TunnelsManager {
-    private var tunnels: [TunnelContainer]
+    var tunnels: [TunnelContainer]
     weak var tunnelsListDelegate: TunnelsManagerListDelegate?
     weak var activationDelegate: TunnelsManagerActivationDelegate?
     private var statusObservationToken: NotificationToken?
@@ -838,7 +838,8 @@ class TunnelContainer: NSObject {
     #endif
 
     private var networkExtensionTunnelProvider: NETunnelProviderManager?
-    private let daemonConfiguration: TunnelConfiguration?
+    private var daemonConfiguration: TunnelConfiguration?
+    let daemonProfileID: UUID?
 
     fileprivate var tunnelProvider: NETunnelProviderManager {
         get {
@@ -878,17 +879,25 @@ class TunnelContainer: NSObject {
         hasOnDemandRules = !(tunnel.onDemandRules ?? []).isEmpty
         networkExtensionTunnelProvider = tunnel
         daemonConfiguration = nil
+        daemonProfileID = nil
         super.init()
     }
 
-    init(daemonConfiguration: TunnelConfiguration, status: TunnelStatus) {
+    init(daemonProfileID: UUID, daemonConfiguration: TunnelConfiguration, status: TunnelStatus) {
         name = daemonConfiguration.name ?? "Unnamed"
         self.status = status
         isActivateOnDemandEnabled = false
         hasOnDemandRules = false
         networkExtensionTunnelProvider = nil
         self.daemonConfiguration = daemonConfiguration
+        self.daemonProfileID = daemonProfileID
         super.init()
+    }
+
+    func updateDaemonConfiguration(_ configuration: TunnelConfiguration) {
+        guard daemonProfileID != nil else { return }
+        daemonConfiguration = configuration
+        name = configuration.name ?? "Unnamed"
     }
 
     func getRuntimeTunnelConfiguration(
