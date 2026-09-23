@@ -139,14 +139,17 @@ static int delete_address(const char *name, const char *local) {
 import "C"
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
 	"net/netip"
 	"os"
+	"os/exec"
 	"strings"
 	"sync/atomic"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/net/route"
@@ -166,6 +169,7 @@ type IPv4Route struct {
 var routeSequence atomic.Uint32
 
 const routeDiagnosticLimit = 6
+const routeCommandTimeout = 2 * time.Second
 
 var (
 	addressStateErrorCode = int(C.ADDRESS_STATE_ERROR)
@@ -399,10 +403,21 @@ func (configured *IPv4Route) requestOwnedRoute() (*route.RouteMessage, error) {
 	return configured.requestWithAddrs(syscall.RTM_GET, configured.ownedRouteRequestAddrs())
 }
 
+func (configured *IPv4Route) requestDestinationRoute() (*route.RouteMessage, error) {
+	return configured.requestWithAddrs(syscall.RTM_GET, configured.destinationRouteRequestAddrs())
+}
+
 func (configured *IPv4Route) ownedRouteRequestAddrs() []route.Addr {
 	addrs := make([]route.Addr, syscall.RTAX_IFP+1)
 	addrs[syscall.RTAX_DST] = &route.Inet4Addr{IP: configured.target.As4()}
 	addrs[syscall.RTAX_NETMASK] = &route.Inet4Addr{IP: [4]byte{255, 255, 255, 255}}
+	addrs[syscall.RTAX_IFP] = &route.LinkAddr{Index: configured.iface.Index, Name: configured.name}
+	return addrs
+}
+
+func (configured *IPv4Route) destinationRouteRequestAddrs() []route.Addr {
+	addrs := make([]route.Addr, syscall.RTAX_IFP+1)
+	addrs[syscall.RTAX_DST] = &route.Inet4Addr{IP: configured.target.As4()}
 	addrs[syscall.RTAX_IFP] = &route.LinkAddr{Index: configured.iface.Index, Name: configured.name}
 	return addrs
 }
@@ -450,11 +465,58 @@ func (configured *IPv4Route) matches(message *route.RouteMessage) bool {
 }
 
 func (configured *IPv4Route) routeOwnershipDiagnostic(message *route.RouteMessage) string {
-	return configured.formatRouteOwnershipDiagnostic(message, configured.coveringRoutes())
+	destination, err := configured.requestDestinationRoute()
+	destinationSummary := routeLookupSummary(destination, err)
+	return configured.formatRouteOwnershipDiagnostic(message, destinationSummary, configured.routeCommandSummary(), configured.coveringRoutes())
 }
 
-func (configured *IPv4Route) formatRouteOwnershipDiagnostic(message *route.RouteMessage, covering string) string {
-	return fmt.Sprintf("synthetic route ownership changed: expected dst=%s netmask=255.255.255.255 utun=%q ifp_index=%d; actual flags=%#x rtm_index=%d dst=%s netmask=%s gateway=%s ifp=%s; covering=%s", configured.target, configured.name, configured.iface.Index, message.Flags, message.Index, routeAddressValue(message, syscall.RTAX_DST), routeAddressValue(message, syscall.RTAX_NETMASK), routeAddressValue(message, syscall.RTAX_GATEWAY), routeAddressValue(message, syscall.RTAX_IFP), covering)
+func (configured *IPv4Route) formatRouteOwnershipDiagnostic(masked *route.RouteMessage, destination, command, covering string) string {
+	return fmt.Sprintf("synthetic route ownership changed: expected dst=%s netmask=255.255.255.255 utun=%q ifp_index=%d; masked_get=%s; destination_get=%s; route_get=%s; covering=%s", configured.target, configured.name, configured.iface.Index, routeMessageSummary(masked), destination, command, covering)
+}
+
+func routeLookupSummary(message *route.RouteMessage, err error) string {
+	if err != nil {
+		return "unavailable"
+	}
+	return routeMessageSummary(message)
+}
+
+func routeMessageSummary(message *route.RouteMessage) string {
+	if message == nil {
+		return "absent"
+	}
+	return fmt.Sprintf("flags=%#x,index=%d,dst=%s,netmask=%s,gateway=%s,ifp=%s", message.Flags, message.Index, routeAddressValue(message, syscall.RTAX_DST), routeAddressValue(message, syscall.RTAX_NETMASK), routeAddressValue(message, syscall.RTAX_GATEWAY), routeAddressValue(message, syscall.RTAX_IFP))
+}
+
+func (configured *IPv4Route) routeCommandSummary() string {
+	ctx, cancel := context.WithTimeout(context.Background(), routeCommandTimeout)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, "/sbin/route", "-n", "get", configured.target.String()).Output()
+	if err != nil || ctx.Err() != nil {
+		return "unavailable"
+	}
+	return safeRouteCommandOutput(string(output))
+}
+
+func safeRouteCommandOutput(output string) string {
+	const routeCommandFieldLimit = 5
+	allowed := map[string]bool{"route to": true, "destination": true, "gateway": true, "interface": true, "flags": true}
+	var fields []string
+	for _, line := range strings.Split(output, "\n") {
+		key, value, found := strings.Cut(line, ":")
+		key, value = strings.TrimSpace(key), strings.TrimSpace(value)
+		if !found || !allowed[key] || len(value) > 128 || strings.ContainsAny(value, "\r\n") {
+			continue
+		}
+		fields = append(fields, key+"="+value)
+		if len(fields) == routeCommandFieldLimit {
+			break
+		}
+	}
+	if len(fields) == 0 {
+		return "unavailable"
+	}
+	return strings.Join(fields, ",")
 }
 
 func (configured *IPv4Route) coveringRoutes() string {

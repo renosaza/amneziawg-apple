@@ -94,6 +94,22 @@ func TestSyntheticIPv4OwnedRouteRequestIncludesIFP(t *testing.T) {
 	}
 }
 
+func TestSyntheticIPv4DestinationRouteRequestOmitsNetmask(t *testing.T) {
+	configured := &IPv4Route{
+		name:   "utun7",
+		target: netip.MustParseAddr("192.0.2.10"),
+		iface:  &net.Interface{Index: 7, Name: "utun7"},
+	}
+	addrs := configured.destinationRouteRequestAddrs()
+	if addrs[syscall.RTAX_NETMASK] != nil {
+		t.Fatal("destination route request included a netmask")
+	}
+	link, ok := addrs[syscall.RTAX_IFP].(*route.LinkAddr)
+	if !ok || link.Index != configured.iface.Index || link.Name != configured.name {
+		t.Fatal("destination route request does not ask for the recorded utun interface")
+	}
+}
+
 func TestSyntheticIPv4RouteDiagnosticIncludesOnlyBoundedRouteMetadata(t *testing.T) {
 	configured := &IPv4Route{
 		name:   "utun7",
@@ -107,13 +123,20 @@ func TestSyntheticIPv4RouteDiagnosticIncludesOnlyBoundedRouteMetadata(t *testing
 		nil,
 		&route.LinkAddr{Name: "utun7", Index: 7, Addr: []byte{1, 2, 3, 4, 5, 6}},
 	}}
-	diagnostic := configured.formatRouteOwnershipDiagnostic(message, "0.0.0.0/0(flags=0x1,index=1,ifp=link(name=\"en0\",index=1))")
-	for _, expected := range []string{"expected dst=192.0.2.10", "utun=\"utun7\"", "ifp_index=7", "rtm_index=7", "dst=192.0.2.10", "netmask=255.255.255.255", "gateway=link(name=\"utun7\",index=7)", "covering=0.0.0.0/0"} {
+	diagnostic := configured.formatRouteOwnershipDiagnostic(message, "flags=0x5,index=7,dst=192.0.2.10,netmask=absent,gateway=absent,ifp=link(name=\"utun7\",index=7)", "route to=192.0.2.10,destination=192.0.2.10,interface=utun7", "0.0.0.0/0(flags=0x1,index=1,ifp=link(name=\"en0\",index=1))")
+	for _, expected := range []string{"expected dst=192.0.2.10", "utun=\"utun7\"", "ifp_index=7", "masked_get=flags=0x5,index=7,dst=192.0.2.10", "destination_get=flags=0x5,index=7,dst=192.0.2.10", "route_get=route to=192.0.2.10", "covering=0.0.0.0/0"} {
 		if !strings.Contains(diagnostic, expected) {
 			t.Fatalf("diagnostic missing %q: %s", expected, diagnostic)
 		}
 	}
 	if strings.Contains(diagnostic, "010203040506") {
 		t.Fatalf("diagnostic exposed link-layer address: %s", diagnostic)
+	}
+}
+
+func TestSafeRouteCommandOutputFiltersAndBoundsFields(t *testing.T) {
+	output := "   route to: 192.0.2.10\n destination: 192.0.2.10\n gateway: 192.0.2.1\n interface: utun7\n flags: <UP,HOST>\n expire: 1\n"
+	if actual, expected := safeRouteCommandOutput(output), "route to=192.0.2.10,destination=192.0.2.10,gateway=192.0.2.1,interface=utun7,flags=<UP,HOST>"; actual != expected {
+		t.Fatalf("unexpected route output: %s", actual)
 	}
 }
