@@ -63,8 +63,26 @@ public class WireGuardAdapter {
     /// Adapter state.
     private var state: State = .stopped
 
+    /// Tunnel device file descriptors claimed by adapters in this process.
+    /// A macOS extension process can host multiple tunnel sessions, each of
+    /// which must attach its backend to a distinct utun device.
+    private static var claimedTunnelFileDescriptors = Set<Int32>()
+    private static let claimedTunnelFileDescriptorsLock = NSLock()
+
+    /// The utun file descriptor claimed by this adapter, if any.
+    private var claimedTunnelFileDescriptor: Int32?
+
     /// Tunnel device file descriptor.
     private var tunnelFileDescriptor: Int32? {
+        if let claimedTunnelFileDescriptor {
+            return claimedTunnelFileDescriptor
+        }
+        return utunFileDescriptors.first
+    }
+
+    /// File descriptors of all utun devices opened by this process.
+    private var utunFileDescriptors: [Int32] {
+        var fileDescriptors = [Int32]()
         var ctlInfo = ctl_info()
         withUnsafeMutablePointer(to: &ctlInfo.ctl_name) {
             $0.withMemoryRebound(to: CChar.self, capacity: MemoryLayout.size(ofValue: $0.pointee)) {
@@ -90,10 +108,85 @@ public class WireGuardAdapter {
                 }
             }
             if addr.sc_id == ctlInfo.ctl_id {
-                return fd
+                fileDescriptors.append(fd)
             }
         }
-        return nil
+        return fileDescriptors
+    }
+
+    /// Atomically claims the utun device belonging to this adapter's tunnel.
+    /// Network settings are installed before backend startup, so the matching
+    /// device already carries one of the configured interface addresses. Do
+    /// not claim an arbitrary available utun when that identity is absent.
+    private func claimTunnelFileDescriptor(for tunnelConfiguration: TunnelConfiguration) -> Int32? {
+        if let claimedTunnelFileDescriptor {
+            return claimedTunnelFileDescriptor
+        }
+
+        Self.claimedTunnelFileDescriptorsLock.lock()
+        defer { Self.claimedTunnelFileDescriptorsLock.unlock() }
+
+        let candidates = utunFileDescriptors.filter { !Self.claimedTunnelFileDescriptors.contains($0) }
+        let matching = candidates.first { fileDescriptor in
+            guard let interfaceName = Self.interfaceName(forTunnelFileDescriptor: fileDescriptor) else { return false }
+            return Self.interface(interfaceName, hasAnyAddressOf: tunnelConfiguration.interface.addresses)
+        }
+        guard let fileDescriptor = matching else { return nil }
+
+        Self.claimedTunnelFileDescriptors.insert(fileDescriptor)
+        claimedTunnelFileDescriptor = fileDescriptor
+        return fileDescriptor
+    }
+
+    /// Releases the utun device claimed by this adapter.
+    private func releaseTunnelFileDescriptor() {
+        Self.claimedTunnelFileDescriptorsLock.lock()
+        defer { Self.claimedTunnelFileDescriptorsLock.unlock() }
+
+        if let claimedTunnelFileDescriptor {
+            Self.claimedTunnelFileDescriptors.remove(claimedTunnelFileDescriptor)
+            self.claimedTunnelFileDescriptor = nil
+        }
+    }
+
+    /// Returns whether an interface carries an address from the tunnel configuration.
+    private class func interface(_ interfaceName: String, hasAnyAddressOf addresses: [IPAddressRange]) -> Bool {
+        var interfaceAddresses: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&interfaceAddresses) == 0 else { return false }
+        defer { freeifaddrs(interfaceAddresses) }
+
+        let addressStrings = Set(addresses.map { "\($0.address)" })
+        var cursor = interfaceAddresses
+        while let interfaceAddress = cursor?.pointee {
+            cursor = interfaceAddress.ifa_next
+            guard let address = interfaceAddress.ifa_addr,
+                  String(cString: interfaceAddress.ifa_name) == interfaceName else {
+                continue
+            }
+
+            var addressString: String?
+            switch Int32(address.pointee.sa_family) {
+            case AF_INET:
+                var address4 = UnsafeRawPointer(address).assumingMemoryBound(to: sockaddr_in.self).pointee
+                var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+                if inet_ntop(AF_INET, &address4.sin_addr, &buffer, socklen_t(INET_ADDRSTRLEN)) != nil {
+                    addressString = String(cString: buffer)
+                }
+            case AF_INET6:
+                var address6 = UnsafeRawPointer(address).assumingMemoryBound(to: sockaddr_in6.self).pointee
+                var buffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
+                if inet_ntop(AF_INET6, &address6.sin6_addr, &buffer, socklen_t(INET6_ADDRSTRLEN)) != nil {
+                    addressString = String(cString: buffer)
+                }
+            default:
+                continue
+            }
+
+            if let addressString, addressStrings.contains(addressString) {
+                return true
+            }
+        }
+        return false
     }
 
     /// Returns a WireGuard version.
@@ -108,7 +201,11 @@ public class WireGuardAdapter {
     /// - Returns: String.
     public var interfaceName: String? {
         guard let tunnelFileDescriptor = self.tunnelFileDescriptor else { return nil }
+        return Self.interfaceName(forTunnelFileDescriptor: tunnelFileDescriptor)
+    }
 
+    /// Returns the interface name of a utun device file descriptor, or nil on error.
+    private class func interfaceName(forTunnelFileDescriptor tunnelFileDescriptor: Int32) -> String? {
         var buffer = [UInt8](repeating: 0, count: Int(IFNAMSIZ))
 
         return buffer.withUnsafeMutableBufferPointer { mutableBufferPointer in
@@ -155,6 +252,8 @@ public class WireGuardAdapter {
         if case .started(let handle, _) = self.state {
             wgTurnOff(handle)
         }
+
+        releaseTunnelFileDescriptor()
     }
 
     // MARK: - Public methods
@@ -207,7 +306,7 @@ public class WireGuardAdapter {
                 self.logEndpointResolutionResults(resolutionResults)
 
                 self.state = .started(
-                    try self.startWireGuardBackend(wgConfig: wgConfig),
+                    try self.startWireGuardBackend(wgConfig: wgConfig, tunnelConfiguration: tunnelConfiguration),
                     settingsGenerator
                 )
                 self.networkMonitor = networkMonitor
@@ -241,6 +340,7 @@ public class WireGuardAdapter {
             self.networkMonitor?.cancel()
             self.networkMonitor = nil
 
+            self.releaseTunnelFileDescriptor()
             self.state = .stopped
 
             completionHandler(nil)
@@ -384,17 +484,20 @@ public class WireGuardAdapter {
     }
 
     /// Start WireGuard backend.
-    /// - Parameter wgConfig: WireGuard configuration
+    /// - Parameters:
+    ///   - wgConfig: WireGuard configuration
+    ///   - tunnelConfiguration: tunnel configuration
     /// - Throws: an error of type `WireGuardAdapterError`
     /// - Returns: tunnel handle
-    private func startWireGuardBackend(wgConfig: String) throws -> Int32 {
-        guard let tunnelFileDescriptor = self.tunnelFileDescriptor else {
+    private func startWireGuardBackend(wgConfig: String, tunnelConfiguration: TunnelConfiguration) throws -> Int32 {
+        guard let tunnelFileDescriptor = self.claimTunnelFileDescriptor(for: tunnelConfiguration) else {
             throw WireGuardAdapterError.cannotLocateTunnelFileDescriptor
         }
 
         self.logHandler(.verbose, "Starting WireGuard backend (config bytes: \(wgConfig.utf8.count), fd: \(tunnelFileDescriptor))")
         let handle = wgTurnOn(wgConfig, tunnelFileDescriptor)
         if handle < 0 {
+            releaseTunnelFileDescriptor()
             throw WireGuardAdapterError.startWireGuardBackend(handle)
         }
         self.logHandler(.verbose, "WireGuard backend started with handle \(handle)")
@@ -499,7 +602,7 @@ public class WireGuardAdapter {
                 self.logEndpointResolutionResults(resolutionResults)
 
                 self.state = .started(
-                    try self.startWireGuardBackend(wgConfig: wgConfig),
+                    try self.startWireGuardBackend(wgConfig: wgConfig, tunnelConfiguration: settingsGenerator.tunnelConfiguration),
                     settingsGenerator
                 )
             } catch {
