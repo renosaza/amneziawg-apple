@@ -143,6 +143,9 @@ func (server *Server) apply(request request) response {
 		}
 		session, err := server.backend.Start(request.Config)
 		if err != nil {
+			if session.value != nil {
+				server.profiles[request.ProfileID] = session
+			}
 			return response{Error: "start_failed"}
 		}
 		server.profiles[request.ProfileID] = session

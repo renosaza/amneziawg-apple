@@ -24,14 +24,15 @@ const profileIDThree = "33333333-2222-4333-8444-555555555555"
 const syntheticConfig = "private_key=synthetic"
 
 type fakeBackend struct {
-	mu           sync.Mutex
-	config       string
-	starts       int
-	stops        int
-	fail         bool
-	failStarts   int
-	status       error
-	stopFailures int
+	mu                     sync.Mutex
+	config                 string
+	starts                 int
+	stops                  int
+	fail                   bool
+	failStarts             int
+	status                 error
+	stopFailures           int
+	returnSessionOnFailure bool
 }
 
 func (backend *fakeBackend) Start(config string) (Session, error) {
@@ -39,6 +40,9 @@ func (backend *fakeBackend) Start(config string) (Session, error) {
 	defer backend.mu.Unlock()
 	backend.config, backend.starts = config, backend.starts+1
 	if backend.fail {
+		if backend.returnSessionOnFailure {
+			return Session{value: backend.starts}, errors.New("synthetic failure")
+		}
 		return Session{}, errors.New("synthetic failure")
 	}
 	if backend.failStarts > 0 {
@@ -46,6 +50,24 @@ func (backend *fakeBackend) Start(config string) (Session, error) {
 		return Session{}, errors.New("synthetic failure")
 	}
 	return Session{value: backend.starts}, nil
+}
+
+func TestFailedStartRetainsSessionForCleanupRetry(t *testing.T) {
+	backend := &fakeBackend{fail: true, returnSessionOnFailure: true}
+	server, err := NewServerWithBackend(501, backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response := server.apply(request{Operation: "start", ProfileID: profileID, Config: syntheticConfig}); response.Error != "start_failed" {
+		t.Fatalf("start: %#v", response)
+	}
+	if response := server.apply(request{Operation: "start", ProfileID: profileID, Config: syntheticConfig}); response.Error != "already_running" {
+		t.Fatalf("retry discarded failed session: %#v", response)
+	}
+	backend.fail = false
+	if response := server.apply(request{Operation: "stop", ProfileID: profileID}); !response.OK {
+		t.Fatalf("cleanup retry: %#v", response)
+	}
 }
 func (backend *fakeBackend) Stop(Session) error {
 	backend.mu.Lock()

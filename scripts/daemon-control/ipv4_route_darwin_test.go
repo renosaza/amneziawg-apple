@@ -24,6 +24,17 @@ func TestSyntheticIPv4Validation(t *testing.T) {
 	if _, _, _, err := ipv4("::1", "192.0.2.1", "192.0.2.10"); err == nil {
 		t.Fatal("accepted non-IPv4 address")
 	}
+	if _, _, _, err := ipv4("198.51.100.2", "192.0.2.1", "192.0.2.10"); err == nil {
+		t.Fatal("accepted a non-TEST-NET address")
+	}
+	seen := make(map[string]bool)
+	for _, spec := range syntheticIPv4RouteSpecs {
+		_, _, target, err := ipv4(spec.local, spec.peer, spec.target)
+		if err != nil || seen[target.String()] {
+			t.Fatalf("invalid or duplicate session route spec: %#v", spec)
+		}
+		seen[target.String()] = true
+	}
 }
 
 func TestSyntheticIPv4AddressStateValidation(t *testing.T) {
@@ -115,6 +126,10 @@ func TestSyntheticIPv4RouteLookupOwnership(t *testing.T) {
 	}
 	if addrs[syscall.RTAX_NETMASK] != nil {
 		t.Fatal("route lookup included a netmask")
+	}
+	targetAddrs := configured.requestTargetLookupAddrs()
+	if len(targetAddrs) != 1 || targetAddrs[0] == nil {
+		t.Fatal("target lookup included an interface or omitted its destination")
 	}
 }
 

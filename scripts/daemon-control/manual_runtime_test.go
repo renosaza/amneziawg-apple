@@ -9,11 +9,20 @@ import (
 	"testing"
 )
 
+func newTunnelBackendForManualRuntime(binary string) (Backend, error) {
+	backend, err := newTunnelBackend(binary)
+	if err != nil {
+		return nil, err
+	}
+	backend.(*tunnelBackend).syntheticIPv4Routes = true
+	return backend, nil
+}
+
 func TestManualSyntheticThreeTunnelLifecycle(t *testing.T) {
 	if os.Getenv("AMNEZIAWG_DAEMON_RUNTIME") != "1" {
 		t.Skip("manual disposable-runner test")
 	}
-	backend, err := NewTunnelBackend(os.Getenv("AMNEZIAWG_DAEMON_BINARY"))
+	backend, err := newTunnelBackendForManualRuntime(os.Getenv("AMNEZIAWG_DAEMON_BINARY"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,84 +53,47 @@ func TestManualSyntheticThreeTunnelLifecycle(t *testing.T) {
 			t.Fatalf("status %s failed: %#v", profile.id, status)
 		}
 	}
-	process, ok := server.profiles[profileID].value.(*tunnelProcess)
-	if !ok {
-		t.Fatal("missing owned tunnel process")
+	targets := make(map[string]bool)
+	for _, profile := range profiles {
+		process, ok := server.profiles[profile.id].value.(*tunnelProcess)
+		if !ok || process.route == nil {
+			t.Fatalf("missing owned synthetic route for %s", profile.id)
+		}
+		if err := process.route.verify(); err != nil {
+			t.Fatal(err)
+		}
+		if targets[process.route.target.String()] {
+			t.Fatal("synthetic routes share a target")
+		}
+		targets[process.route.target.String()] = true
+		t.Logf("owned synthetic route target=%s interface=%s index=%d", process.route.target, process.route.name, process.route.iface.Index)
 	}
-	configured, err := configureSyntheticIPv4Route(process, "192.0.2.2", "192.0.2.1", "192.0.2.10")
-	if configured != nil {
-		t.Cleanup(func() {
-			if err := configured.Close(); err != nil {
-				t.Errorf("route cleanup failed: %v", err)
-				return
-			}
-			t.Logf("removed synthetic route target=%s interface=%s index=%d", configured.target, configured.name, configured.iface.Index)
-		})
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := configured.verify(); err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("owned synthetic route target=%s interface=%s index=%d", configured.target, configured.name, configured.iface.Index)
-	endpointRoute, err := configureSyntheticPhysicalEndpointRoute("203.0.113.10")
-	if endpointRoute != nil {
-		t.Cleanup(func() {
-			if err := endpointRoute.Close(); err != nil {
-				t.Errorf("endpoint route cleanup failed: %v", err)
-				return
-			}
-			t.Logf("removed synthetic endpoint route target=%s gateway=%s interface=%s index=%d", endpointRoute.target, endpointRoute.gateway, endpointRoute.iface.Name, endpointRoute.iface.Index)
-		})
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := endpointRoute.verify(); err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("owned synthetic endpoint route target=%s gateway=%s interface=%s index=%d", endpointRoute.target, endpointRoute.gateway, endpointRoute.iface.Name, endpointRoute.iface.Index)
-	precedenceEndpoint, err := configureSyntheticPrecedenceEndpointRoute("198.51.100.10")
-	if precedenceEndpoint != nil {
-		t.Cleanup(func() {
-			if err := precedenceEndpoint.Close(); err != nil {
-				t.Errorf("precedence endpoint cleanup failed: %v", err)
-				return
-			}
-			t.Logf("removed synthetic precedence endpoint target=%s gateway=%s interface=%s index=%d", precedenceEndpoint.target, precedenceEndpoint.gateway, precedenceEndpoint.iface.Name, precedenceEndpoint.iface.Index)
-		})
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	fallbackRoute, err := configureSyntheticFallbackRoute(process)
-	if fallbackRoute != nil {
-		t.Cleanup(func() {
-			if err := fallbackRoute.Close(); err != nil {
-				t.Errorf("fallback route cleanup failed: %v", err)
-				return
-			}
-			t.Logf("removed synthetic fallback prefix=%s interface=%s index=%d", fallbackRoute.prefix, fallbackRoute.name, fallbackRoute.iface.Index)
-		})
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := fallbackRoute.verify(); err != nil {
-		t.Fatal(err)
-	}
-	if err := precedenceEndpoint.verify(); err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("owned synthetic fallback prefix=%s interface=%s index=%d", fallbackRoute.prefix, fallbackRoute.name, fallbackRoute.iface.Index)
-	t.Logf("owned synthetic precedence endpoint target=%s gateway=%s interface=%s index=%d", precedenceEndpoint.target, precedenceEndpoint.gateway, precedenceEndpoint.iface.Name, precedenceEndpoint.iface.Index)
+	middle := server.profiles[profileIDTwo].value.(*tunnelProcess)
+	middleRoute := middle.route
 	if stopped := server.apply(request{Operation: "stop", ProfileID: profileIDTwo}); !stopped.OK {
 		t.Fatalf("stop middle tunnel failed: %#v", stopped)
+	}
+	if err := middleRoute.proveAbsentAfterTunnelExit(); err != nil {
+		t.Fatal(err)
 	}
 	for _, profile := range []struct{ id string }{{profileID}, {profileIDThree}} {
 		if status := server.apply(request{Operation: "status", ProfileID: profile.id}); !status.OK {
 			t.Fatalf("remaining status %s failed: %#v", profile.id, status)
 		}
+		process := server.profiles[profile.id].value.(*tunnelProcess)
+		if err := process.route.verify(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const replacementID = "44444444-2222-4333-8444-555555555555"
+	if started := server.apply(request{Operation: "start", ProfileID: replacementID, Config: "private_key=0404040404040404040404040404040404040404040404040404040404040404"}); !started.OK {
+		t.Fatalf("replacement start failed: %#v", started)
+	}
+	replacement := server.profiles[replacementID].value.(*tunnelProcess)
+	if replacement.route == nil || replacement.route.target != middleRoute.target {
+		t.Fatal("stopped session route slot was not reused")
+	}
+	if err := replacement.route.verify(); err != nil {
+		t.Fatal(err)
 	}
 }
