@@ -183,7 +183,7 @@ func configureSyntheticIPv4Route(process *tunnelProcess, localText, peerText, ta
 		return nil, err
 	}
 	configured := &IPv4Route{name: process.name, local: local.String(), peer: peer.String(), target: target, iface: iface}
-	if existing, err := configured.request(syscall.RTM_GET); err == nil && existing.Err == nil {
+	if existing, err := configured.request(syscall.RTM_GET); err == nil && existing.Err == nil && configured.isTargetHostRoute(existing) {
 		return nil, errors.New("refusing to replace an existing route")
 	}
 	if err := configured.preflightAddress(); err != nil {
@@ -424,8 +424,15 @@ func (configured *IPv4Route) request(kind int) (*route.RouteMessage, error) {
 }
 
 func (configured *IPv4Route) matches(message *route.RouteMessage) bool {
+	if !configured.isTargetHostRoute(message) {
+		return false
+	}
+	link, linkOK := message.Addrs[syscall.RTAX_IFP].(*route.LinkAddr)
+	return linkOK && link.Index == configured.iface.Index
+}
+
+func (configured *IPv4Route) isTargetHostRoute(message *route.RouteMessage) bool {
 	destination, destinationOK := message.Addrs[syscall.RTAX_DST].(*route.Inet4Addr)
 	mask, maskOK := message.Addrs[syscall.RTAX_NETMASK].(*route.Inet4Addr)
-	link, linkOK := message.Addrs[syscall.RTAX_IFP].(*route.LinkAddr)
-	return destinationOK && maskOK && linkOK && destination.IP == configured.target.As4() && mask.IP == [4]byte{255, 255, 255, 255} && link.Index == configured.iface.Index
+	return destinationOK && maskOK && message.Flags&syscall.RTF_HOST != 0 && destination.IP == configured.target.As4() && mask.IP == [4]byte{255, 255, 255, 255}
 }

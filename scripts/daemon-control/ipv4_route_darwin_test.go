@@ -6,8 +6,11 @@ package daemoncontrol
 
 import (
 	"errors"
+	"net/netip"
 	"syscall"
 	"testing"
+
+	"golang.org/x/net/route"
 )
 
 func TestSyntheticIPv4Validation(t *testing.T) {
@@ -50,5 +53,25 @@ func TestSyntheticIPv4CleanupStateTransitions(t *testing.T) {
 	configured.recordFlagRestore(cleanupErr)
 	if !configured.routeSet || !configured.addressSet || !configured.upChanged {
 		t.Fatal("failed cleanup released ownership")
+	}
+}
+
+func TestSyntheticIPv4PreflightAcceptsDefaultRouteButRejectsTargetHostRoute(t *testing.T) {
+	configured := &IPv4Route{target: netip.MustParseAddr("192.0.2.10")}
+	defaultRoute := &route.RouteMessage{Flags: syscall.RTF_UP, Addrs: []route.Addr{
+		&route.Inet4Addr{IP: [4]byte{0, 0, 0, 0}},
+		nil,
+		&route.Inet4Addr{IP: [4]byte{0, 0, 0, 0}},
+	}}
+	if configured.isTargetHostRoute(defaultRoute) {
+		t.Fatal("treated the default route as a target host route")
+	}
+	targetHostRoute := &route.RouteMessage{Flags: syscall.RTF_UP | syscall.RTF_HOST, Addrs: []route.Addr{
+		&route.Inet4Addr{IP: [4]byte{192, 0, 2, 10}},
+		nil,
+		&route.Inet4Addr{IP: [4]byte{255, 255, 255, 255}},
+	}}
+	if !configured.isTargetHostRoute(targetHostRoute) {
+		t.Fatal("did not identify the target host route")
 	}
 }
