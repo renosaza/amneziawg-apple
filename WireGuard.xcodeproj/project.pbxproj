@@ -218,6 +218,85 @@
 		6FFA5DA021958ECC0001E2F7 /* ErrorNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FFA5D9F21958ECC0001E2F7 /* ErrorNotifier.swift */; };
 		6FFA5DA42197085D0001E2F7 /* ActivateOnDemandOption.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FFA5DA32197085D0001E2F7 /* ActivateOnDemandOption.swift */; };
 		6FFACD2021E4D8D500E9A2A5 /* ParseError+WireGuardAppError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FFACD1E21E4D89600E9A2A5 /* ParseError+WireGuardAppError.swift */; };
+		7A00000B2F00000100000001 /* DaemonTunnelState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A00000A2F00000100000001 /* DaemonTunnelState.swift */; };
+		7A00000D2F00000100000001 /* DaemonTunnelsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A00000C2F00000100000001 /* DaemonTunnelsManager.swift */; };
+		7A0001002F00000100000001 /* DaemonControlClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A0000062F00000100000001 /* DaemonControlClient.swift */; };
+		7A0001012F00000100000001 /* DaemonTunnelState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A00000A2F00000100000001 /* DaemonTunnelState.swift */; };
+		7A0001022F00000100000001 /* DaemonTunnelsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A00000C2F00000100000001 /* DaemonTunnelsManager.swift */; };
+		7A0001032F00000100000001 /* DaemonProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A0000092F00000100000001 /* DaemonProfileStore.swift */; };
+		7A0001042F00000100000001 /* NotificationToken.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58233BCE2591F842002060A8 /* NotificationToken.swift */; };
+		7A0001052F00000100000001 /* Application.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FBA101321D613F30051C35F /* Application.swift */; };
+		7A0001062F00000100000001 /* TunnelsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F7774EE21722D97006A79B3 /* TunnelsManager.swift */; };
+		7A0001072F00000100000001 /* ActivateOnDemandViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F8F0D7022258153000E8335 /* ActivateOnDemandViewModel.swift */; };
+		7A0001082F00000100000001 /* ActivateOnDemandOption.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FFA5DA32197085D0001E2F7 /* ActivateOnDemandOption.swift */; };
+		7A0001092F00000100000001 /* TunnelStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F4541A821C451D100994C13 /* TunnelStatus.swift */; };
+		7A00010A2F00000100000001 /* TunnelErrors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F7F7E5E21C7D74B00527607 /* TunnelErrors.swift */; };
+		7A00010B2F00000100000001 /* ZipImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FE254FA219C10800028284D /* ZipImporter.swift */; };
+		7A00010C2F00000100000001 /* ZipExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FE254FE219C60290028284D /* ZipExporter.swift */; };
+		7A00010D2F00000100000001 /* DNSServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585B10482577E293004F691E /* DNSServer.swift */; };
+		7A00010E2F00000100000001 /* Endpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585B10522577E293004F691E /* Endpoint.swift */; };
+		7A00010F2F00000100000001 /* TunnelsListTableViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FBA104521D7EBFA0051C35F /* TunnelsListTableViewController.swift */; };
+		7A0001102F00000100000001 /* ZipArchive.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FDEF801218646B900D8FBF6 /* ZipArchive.swift */; };
+		7A0001112F00000100000001 /* ioapi.c in Sources */ = {isa = PBXBuildFile; fileRef = 6FDEF7FF21863C0100D8FBF6 /* ioapi.c */; };
+		7A0001122F00000100000001 /* TunnelViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F628C3C217F09E9003482A3 /* TunnelViewModel.swift */; };
+		7A0001132F00000100000001 /* LogViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FDB6D12224A15BE00EE4BC3 /* LogViewController.swift */; };
+		7A0001142F00000100000001 /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B5C5E26220A48D30024272E /* Keychain.swift */; };
+		7A0001152F00000100000001 /* ImportPanelPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FCD99AE21E0EA1700BA4C82 /* ImportPanelPresenter.swift */; };
+		7A0001162F00000100000001 /* unzip.c in Sources */ = {isa = PBXBuildFile; fileRef = 6FDEF7F621863B6100D8FBF6 /* unzip.c */; };
+		7A0001172F00000100000001 /* zip.c in Sources */ = {isa = PBXBuildFile; fileRef = 6FDEF7F721863B6100D8FBF6 /* zip.c */; };
+		7A0001182F00000100000001 /* TunnelDetailTableViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FDB3C3A21DCF47400A0C0BF /* TunnelDetailTableViewController.swift */; };
+		7A0001192F00000100000001 /* WireGuardAppError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F61F1E821B932F700483816 /* WireGuardAppError.swift */; };
+		7A00011A2F00000100000001 /* ConfTextStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F52D0BC21E3785C00283CEA /* ConfTextStorage.swift */; };
+		7A00011B2F00000100000001 /* highlighter.c in Sources */ = {isa = PBXBuildFile; fileRef = 5F52D0C121E378C000283CEA /* highlighter.c */; };
+		7A00011C2F00000100000001 /* ManageTunnelsRootViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F4DD16D21DBEA0700690EAE /* ManageTunnelsRootViewController.swift */; };
+		7A00011D2F00000100000001 /* NSTableView+Reuse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F4DD16721DA552B00690EAE /* NSTableView+Reuse.swift */; };
+		7A00011E2F00000100000001 /* WireGuardResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F61F1EA21B937EF00483816 /* WireGuardResult.swift */; };
+		7A00011F2F00000100000001 /* x25519.c in Sources */ = {isa = PBXBuildFile; fileRef = 585B10562577E293004F691E /* x25519.c */; };
+		7A0001202F00000100000001 /* TunnelConfiguration+UapiConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B707D8321F918D4000A8F73 /* TunnelConfiguration+UapiConfig.swift */; };
+		7A0001212F00000100000001 /* LocalizationHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FE1765921C90E87002690EA /* LocalizationHelper.swift */; };
+		7A0001222F00000100000001 /* PeerConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585B10472577E293004F691E /* PeerConfiguration.swift */; };
+		7A0001232F00000100000001 /* TunnelsTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F89E17B21F090CC00C97BB9 /* TunnelsTracker.swift */; };
+		7A0001242F00000100000001 /* PrivateDataConfirmation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B62E45E220A6FA900EF34A6 /* PrivateDataConfirmation.swift */; };
+		7A0001252F00000100000001 /* TunnelEditViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FCD99B021E0EDA900BA4C82 /* TunnelEditViewController.swift */; };
+		7A0001262F00000100000001 /* HandshakeFreshnessEvaluator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CC6A71B2EE8F866008D120D /* HandshakeFreshnessEvaluator.swift */; };
+		7A0001272F00000100000001 /* OnDemandWiFiControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FB17945222FD5960018AE71 /* OnDemandWiFiControls.swift */; };
+		7A0001282F00000100000001 /* IPAddressRange.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585B10512577E293004F691E /* IPAddressRange.swift */; };
+		7A0001292F00000100000001 /* RouteOwnershipValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A0000002F00000100000001 /* RouteOwnershipValidator.swift */; };
+		7A00012A2F00000100000001 /* ringlogger.c in Sources */ = {isa = PBXBuildFile; fileRef = 6FF3526C21C23F960008484E /* ringlogger.c */; };
+		7A00012B2F00000100000001 /* ringlogger.h in Sources */ = {isa = PBXBuildFile; fileRef = 6FF3526B21C23F960008484E /* ringlogger.h */; };
+		7A00012C2F00000100000001 /* TunnelImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FBA103D21D6B6D70051C35F /* TunnelImporter.swift */; };
+		7A00012D2F00000100000001 /* StatusItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F89E17921EDEB0E00C97BB9 /* StatusItemController.swift */; };
+		7A00012E2F00000100000001 /* ButtonRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F5EA59A223E58A8002B380A /* ButtonRow.swift */; };
+		7A00012F2F00000100000001 /* TunnelListRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F4DD16A21DA558800690EAE /* TunnelListRow.swift */; };
+		7A0001302F00000100000001 /* LogViewCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FDB6D14224CB2CE00EE4BC3 /* LogViewCell.swift */; };
+		7A0001312F00000100000001 /* ConfTextColorTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FE3661C21F64F6B00F78C7D /* ConfTextColorTheme.swift */; };
+		7A0001322F00000100000001 /* MainMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F3E02E8228000F6001FE7E3 /* MainMenu.swift */; };
+		7A0001332F00000100000001 /* NSColor+Hex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F52D0BE21E3788900283CEA /* NSColor+Hex.swift */; };
+		7A0001342F00000100000001 /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FF3526E21C23FA10008484E /* Logger.swift */; };
+		7A0001352F00000100000001 /* LaunchedAtLoginDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F6483E6229293300075BA15 /* LaunchedAtLoginDetector.swift */; };
+		7A0001362F00000100000001 /* TunnelConfiguration+WgQuickConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F9696AF21CD7128008063FE /* TunnelConfiguration+WgQuickConfig.swift */; };
+		7A0001372F00000100000001 /* UnusableTunnelDetailViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FADE96A2254A6C200B838A4 /* UnusableTunnelDetailViewController.swift */; };
+		7A0001382F00000100000001 /* ParseError+WireGuardAppError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FFACD1E21E4D89600E9A2A5 /* ParseError+WireGuardAppError.swift */; };
+		7A0001392F00000100000001 /* NETunnelProviderProtocol+Extension.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FFA5D942194454A0001E2F7 /* NETunnelProviderProtocol+Extension.swift */; };
+		7A00013A2F00000100000001 /* DeleteTunnelsConfirmationAlert.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F1075632258AE9800D78929 /* DeleteTunnelsConfirmationAlert.swift */; };
+		7A00013B2F00000100000001 /* StatusMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FBA101621D655340051C35F /* StatusMenu.swift */; };
+		7A00013C2F00000100000001 /* KeyValueRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F613D9A21DE33B8004B217A /* KeyValueRow.swift */; };
+		7A00013D2F00000100000001 /* PrivateKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585B104F2577E293004F691E /* PrivateKey.swift */; };
+		7A00013E2F00000100000001 /* String+ArrayConversion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F4541B121CBFAEE00994C13 /* String+ArrayConversion.swift */; };
+		7A00013F2F00000100000001 /* ConfTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F52D0BA21E3781B00283CEA /* ConfTextView.swift */; };
+		7A0001402F00000100000001 /* ErrorPresenterProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FBA103A21D6B4280051C35F /* ErrorPresenterProtocol.swift */; };
+		7A0001412F00000100000001 /* ButtonedDetailViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FCD99A821E0E0C700BA4C82 /* ButtonedDetailViewController.swift */; };
+		7A0001422F00000100000001 /* ErrorPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FBA104121D6BC210051C35F /* ErrorPresenter.swift */; };
+		7A0001432F00000100000001 /* MacAppStoreUpdateDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F2449E7226587B80047B9E9 /* MacAppStoreUpdateDetector.swift */; };
+		7A0001442F00000100000001 /* InterfaceConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585B10462577E293004F691E /* InterfaceConfiguration.swift */; };
+		7A0001452F00000100000001 /* LogViewHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F907C9B224663A2003CED21 /* LogViewHelper.swift */; };
+		7A0001462F00000100000001 /* FileManager+Extension.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F5A2B4421AFDE020081EDD8 /* FileManager+Extension.swift */; };
+		7A0001472F00000100000001 /* key.c in Sources */ = {isa = PBXBuildFile; fileRef = 585B10572577E293004F691E /* key.c */; };
+		7A0001482F00000100000001 /* TunnelConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585B10492577E293004F691E /* TunnelConfiguration.swift */; };
+		7A0001492F00000100000001 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FB1BD5F21D2607A00A991BF /* AppDelegate.swift */; };
+		7A00014C2F00000100000001 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 4E9BD26E2BC12AAB00D71616 /* Localizable.xcstrings */; };
+		7A00014D2F00000100000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6FB1BD6121D2607E00A991BF /* Assets.xcassets */; };
+		7A00014E2F00000100000001 /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6FB1BDB621D4F8B800A991BF /* NetworkExtension.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -374,6 +453,8 @@
 		6F7774E0217181B1006A79B3 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		6F7774E321718281006A79B3 /* TunnelsListTableViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TunnelsListTableViewController.swift; sourceTree = "<group>"; };
 		7A0000062F00000100000001 /* DaemonControlClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonControlClient.swift; sourceTree = "<group>"; };
+		7A00000A2F00000100000001 /* DaemonTunnelState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonTunnelState.swift; sourceTree = "<group>"; };
+		7A00000C2F00000100000001 /* DaemonTunnelsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonTunnelsManager.swift; sourceTree = "<group>"; };
 		7A0000092F00000100000001 /* DaemonProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonProfileStore.swift; sourceTree = "<group>"; };
 		6F7774EE21722D97006A79B3 /* TunnelsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelsManager.swift; sourceTree = "<group>"; };
 		6F7774F221774263006A79B3 /* TunnelEditTableViewController.swift */ = {isa = PBXFileReference; indentWidth = 4; lastKnownFileType = sourcecode.swift; path = TunnelEditTableViewController.swift; sourceTree = "<group>"; tabWidth = 4; };
@@ -394,6 +475,7 @@
 		6FB1017821C57DE600766195 /* MockTunnels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockTunnels.swift; sourceTree = "<group>"; };
 		6FB17945222FD5960018AE71 /* OnDemandWiFiControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnDemandWiFiControls.swift; sourceTree = "<group>"; };
 		6FB1BD5D21D2607A00A991BF /* AmneziaWG.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AmneziaWG.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7A0000152F00000100000001 /* AmneziaWG Daemon.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "AmneziaWG Daemon.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		6FB1BD5F21D2607A00A991BF /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		6FB1BD6121D2607E00A991BF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		6FB1BD6621D2607E00A991BF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -477,6 +559,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				6B653B86220DE2960050E69C /* NetworkExtension.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7A0000132F00000100000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7A00014E2F00000100000001 /* NetworkExtension.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -656,6 +746,8 @@
 			isa = PBXGroup;
 			children = (
 				7A0000062F00000100000001 /* DaemonControlClient.swift */,
+				7A00000A2F00000100000001 /* DaemonTunnelState.swift */,
+				7A00000C2F00000100000001 /* DaemonTunnelsManager.swift */,
 				6F7774EE21722D97006A79B3 /* TunnelsManager.swift */,
 				6B707D8321F918D4000A8F73 /* TunnelConfiguration+UapiConfig.swift */,
 				6FFA5DA32197085D0001E2F7 /* ActivateOnDemandOption.swift */,
@@ -789,6 +881,7 @@
 				6FF4AC14211EC46F002C96EB /* AmneziaWG.app */,
 				6F5D0C1A218352EF000F85AD /* WireGuardNetworkExtension.appex */,
 				6FB1BD5D21D2607A00A991BF /* AmneziaWG.app */,
+				7A0000152F00000100000001 /* AmneziaWG Daemon.app */,
 				6FB1BD9121D4BFE600A991BF /* WireGuardNetworkExtension.appex */,
 				6F70E22922106A2D008BDFB4 /* WireGuardLoginItemHelper.app */,
 			);
@@ -964,6 +1057,25 @@
 			productReference = 6FF4AC14211EC46F002C96EB /* AmneziaWG.app */;
 			productType = "com.apple.product-type.application";
 		};
+		7A0000102F00000100000001 /* WireGuardmacOSDaemon */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7A0000112F00000100000001 /* Build configuration list for PBXNativeTarget "WireGuardmacOSDaemon" */;
+			buildPhases = (
+				7A0000122F00000100000001 /* Sources */,
+				7A0000132F00000100000001 /* Frameworks */,
+				7A0000142F00000100000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WireGuardmacOSDaemon;
+			packageProductDependencies = (
+			);
+			productName = WireGuardmacOSDaemon;
+			productReference = 7A0000152F00000100000001 /* AmneziaWG Daemon.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -1067,6 +1179,7 @@
 				6F5D0C19218352EF000F85AD /* WireGuardNetworkExtensioniOS */,
 				6FDEF7DD21846BC100D8FBF6 /* WireGuardGoBridgeiOS */,
 				6FB1BD5C21D2607A00A991BF /* WireGuardmacOS */,
+				7A0000102F00000100000001 /* WireGuardmacOSDaemon */,
 				6FB1BD9021D4BFE600A991BF /* WireGuardNetworkExtensionmacOS */,
 				6FDAA03421CE69D000FA6925 /* WireGuardGoBridgemacOS */,
 				6F70E22822106A2D008BDFB4 /* WireGuardmacOSLoginItemHelper */,
@@ -1112,6 +1225,15 @@
 				6FF4AC1F211EC472002C96EB /* Assets.xcassets in Resources */,
 				6F919EDB218C65C50023B400 /* wireguard_doc_logo_64x64.png in Resources */,
 				6F919EDC218C65C50023B400 /* wireguard_doc_logo_320x320.png in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7A0000142F00000100000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7A00014C2F00000100000001 /* Localizable.xcstrings in Resources */,
+				7A00014D2F00000100000001 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1310,6 +1432,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				7A0000052F00000100000001 /* DaemonControlClient.swift in Sources */,
+				7A00000B2F00000100000001 /* DaemonTunnelState.swift in Sources */,
+				7A00000D2F00000100000001 /* DaemonTunnelsManager.swift in Sources */,
 				7A0000082F00000100000001 /* DaemonProfileStore.swift in Sources */,
 				58233BD02591F842002060A8 /* NotificationToken.swift in Sources */,
 				6FBA101521D613F90051C35F /* Application.swift in Sources */,
@@ -1485,6 +1609,87 @@
 				5F4541B221CBFAEE00994C13 /* String+ArrayConversion.swift in Sources */,
 				585B108A2577E294004F691E /* Endpoint.swift in Sources */,
 				6F907C9C224663A2003CED21 /* LogViewHelper.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7A0000122F00000100000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7A0001002F00000100000001 /* DaemonControlClient.swift in Sources */,
+				7A0001012F00000100000001 /* DaemonTunnelState.swift in Sources */,
+				7A0001022F00000100000001 /* DaemonTunnelsManager.swift in Sources */,
+				7A0001032F00000100000001 /* DaemonProfileStore.swift in Sources */,
+				7A0001042F00000100000001 /* NotificationToken.swift in Sources */,
+				7A0001052F00000100000001 /* Application.swift in Sources */,
+				7A0001062F00000100000001 /* TunnelsManager.swift in Sources */,
+				7A0001072F00000100000001 /* ActivateOnDemandViewModel.swift in Sources */,
+				7A0001082F00000100000001 /* ActivateOnDemandOption.swift in Sources */,
+				7A0001092F00000100000001 /* TunnelStatus.swift in Sources */,
+				7A00010A2F00000100000001 /* TunnelErrors.swift in Sources */,
+				7A00010B2F00000100000001 /* ZipImporter.swift in Sources */,
+				7A00010C2F00000100000001 /* ZipExporter.swift in Sources */,
+				7A00010D2F00000100000001 /* DNSServer.swift in Sources */,
+				7A00010E2F00000100000001 /* Endpoint.swift in Sources */,
+				7A00010F2F00000100000001 /* TunnelsListTableViewController.swift in Sources */,
+				7A0001102F00000100000001 /* ZipArchive.swift in Sources */,
+				7A0001112F00000100000001 /* ioapi.c in Sources */,
+				7A0001122F00000100000001 /* TunnelViewModel.swift in Sources */,
+				7A0001132F00000100000001 /* LogViewController.swift in Sources */,
+				7A0001142F00000100000001 /* Keychain.swift in Sources */,
+				7A0001152F00000100000001 /* ImportPanelPresenter.swift in Sources */,
+				7A0001162F00000100000001 /* unzip.c in Sources */,
+				7A0001172F00000100000001 /* zip.c in Sources */,
+				7A0001182F00000100000001 /* TunnelDetailTableViewController.swift in Sources */,
+				7A0001192F00000100000001 /* WireGuardAppError.swift in Sources */,
+				7A00011A2F00000100000001 /* ConfTextStorage.swift in Sources */,
+				7A00011B2F00000100000001 /* highlighter.c in Sources */,
+				7A00011C2F00000100000001 /* ManageTunnelsRootViewController.swift in Sources */,
+				7A00011D2F00000100000001 /* NSTableView+Reuse.swift in Sources */,
+				7A00011E2F00000100000001 /* WireGuardResult.swift in Sources */,
+				7A00011F2F00000100000001 /* x25519.c in Sources */,
+				7A0001202F00000100000001 /* TunnelConfiguration+UapiConfig.swift in Sources */,
+				7A0001212F00000100000001 /* LocalizationHelper.swift in Sources */,
+				7A0001222F00000100000001 /* PeerConfiguration.swift in Sources */,
+				7A0001232F00000100000001 /* TunnelsTracker.swift in Sources */,
+				7A0001242F00000100000001 /* PrivateDataConfirmation.swift in Sources */,
+				7A0001252F00000100000001 /* TunnelEditViewController.swift in Sources */,
+				7A0001262F00000100000001 /* HandshakeFreshnessEvaluator.swift in Sources */,
+				7A0001272F00000100000001 /* OnDemandWiFiControls.swift in Sources */,
+				7A0001282F00000100000001 /* IPAddressRange.swift in Sources */,
+				7A0001292F00000100000001 /* RouteOwnershipValidator.swift in Sources */,
+				7A00012A2F00000100000001 /* ringlogger.c in Sources */,
+				7A00012B2F00000100000001 /* ringlogger.h in Sources */,
+				7A00012C2F00000100000001 /* TunnelImporter.swift in Sources */,
+				7A00012D2F00000100000001 /* StatusItemController.swift in Sources */,
+				7A00012E2F00000100000001 /* ButtonRow.swift in Sources */,
+				7A00012F2F00000100000001 /* TunnelListRow.swift in Sources */,
+				7A0001302F00000100000001 /* LogViewCell.swift in Sources */,
+				7A0001312F00000100000001 /* ConfTextColorTheme.swift in Sources */,
+				7A0001322F00000100000001 /* MainMenu.swift in Sources */,
+				7A0001332F00000100000001 /* NSColor+Hex.swift in Sources */,
+				7A0001342F00000100000001 /* Logger.swift in Sources */,
+				7A0001352F00000100000001 /* LaunchedAtLoginDetector.swift in Sources */,
+				7A0001362F00000100000001 /* TunnelConfiguration+WgQuickConfig.swift in Sources */,
+				7A0001372F00000100000001 /* UnusableTunnelDetailViewController.swift in Sources */,
+				7A0001382F00000100000001 /* ParseError+WireGuardAppError.swift in Sources */,
+				7A0001392F00000100000001 /* NETunnelProviderProtocol+Extension.swift in Sources */,
+				7A00013A2F00000100000001 /* DeleteTunnelsConfirmationAlert.swift in Sources */,
+				7A00013B2F00000100000001 /* StatusMenu.swift in Sources */,
+				7A00013C2F00000100000001 /* KeyValueRow.swift in Sources */,
+				7A00013D2F00000100000001 /* PrivateKey.swift in Sources */,
+				7A00013E2F00000100000001 /* String+ArrayConversion.swift in Sources */,
+				7A00013F2F00000100000001 /* ConfTextView.swift in Sources */,
+				7A0001402F00000100000001 /* ErrorPresenterProtocol.swift in Sources */,
+				7A0001412F00000100000001 /* ButtonedDetailViewController.swift in Sources */,
+				7A0001422F00000100000001 /* ErrorPresenter.swift in Sources */,
+				7A0001432F00000100000001 /* MacAppStoreUpdateDetector.swift in Sources */,
+				7A0001442F00000100000001 /* InterfaceConfiguration.swift in Sources */,
+				7A0001452F00000100000001 /* LogViewHelper.swift in Sources */,
+				7A0001462F00000100000001 /* FileManager+Extension.swift in Sources */,
+				7A0001472F00000100000001 /* key.c in Sources */,
+				7A0001482F00000100000001 /* TunnelConfiguration.swift in Sources */,
+				7A0001492F00000100000001 /* AppDelegate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1897,6 +2102,46 @@
 			};
 			name = Release;
 		};
+		7A0000162F00000100000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Sources/WireGuardApp/UI/macOS/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = AmneziaWG;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.renosaza.amneziawg.daemon-gui;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DAEMON_MODE";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		7A0000172F00000100000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Sources/WireGuardApp/UI/macOS/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = AmneziaWG;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.renosaza.amneziawg.daemon-gui;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DAEMON_MODE";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1968,6 +2213,15 @@
 			buildConfigurations = (
 				6FF4AC27211EC472002C96EB /* Debug */,
 				6FF4AC28211EC472002C96EB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7A0000112F00000100000001 /* Build configuration list for PBXNativeTarget "WireGuardmacOSDaemon" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7A0000162F00000100000001 /* Debug */,
+				7A0000172F00000100000001 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

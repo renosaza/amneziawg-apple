@@ -14,6 +14,7 @@
 - [Decision 0009](architecture/decisions/0009-free-macos-route-precedence-poc.md): synthetic fallback and specific-route precedence experiment.
 - [Decision 0010](architecture/decisions/0010-free-macos-daemon-install-poc.md): manual LaunchDaemon installation experiment.
 - [Decision 0011](architecture/decisions/0011-free-macos-daemon-profile-store.md): isolated macOS daemon-profile storage experiment.
+- [Decision 0013](architecture/decisions/0013-free-macos-stock-gui-readonly.md): unsigned stock-Manager read-only experiment.
 - [Building](BUILDING.md): local macOS build and signing prerequisites.
 - [Local development](guides/local-development.md): verified development checks.
 - [Troubleshooting](guides/troubleshooting.md): verified local toolchain limitation.

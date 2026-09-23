@@ -11,6 +11,7 @@ enum TunnelsManagerError: WireGuardAppError {
     case systemErrorOnAddTunnel(systemError: Error)
     case systemErrorOnModifyTunnel(systemError: Error)
     case systemErrorOnRemoveTunnel(systemError: Error)
+    case daemonModeOperationUnavailable
 
     var alertText: AlertText {
         switch self {
@@ -26,6 +27,8 @@ enum TunnelsManagerError: WireGuardAppError {
             return (tr("alertSystemErrorOnModifyTunnelTitle"), systemError.localizedUIString)
         case .systemErrorOnRemoveTunnel(let systemError):
             return (tr("alertSystemErrorOnRemoveTunnelTitle"), systemError.localizedUIString)
+        case .daemonModeOperationUnavailable:
+            return ("Unavailable", "This operation is not available in unsigned daemon mode yet.")
         }
     }
 }
@@ -38,6 +41,7 @@ enum TunnelsManagerActivationAttemptError: WireGuardAppError {
     case failedWhileSaving(systemError: Error) // save config after re-enabling throwed
     case failedWhileLoading(systemError: Error) // reloading config throwed
     case failedBecauseOfTooManyErrors(lastSystemError: Error) // recursion limit reached
+    case daemonModeOperationUnavailable
 
     var alertText: AlertText {
         switch self {
@@ -47,6 +51,8 @@ enum TunnelsManagerActivationAttemptError: WireGuardAppError {
             return ("Cannot activate \"\(tunnelName)\".", "Route conflict:\n\(route) is already handled by \"\(ownerName)\".")
         case .missingEndpointExclusion(let tunnelName, let endpoint):
             return ("Cannot activate tunnel.", "Full tunnel \"\(tunnelName)\" must exclude VPN endpoint \(endpoint).")
+        case .daemonModeOperationUnavailable:
+            return ("Unavailable", "This operation is not available in unsigned daemon mode yet.")
         case .failedWhileStarting(let systemError),
              .failedWhileSaving(let systemError),
              .failedWhileLoading(let systemError),
