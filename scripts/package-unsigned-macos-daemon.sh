@@ -97,6 +97,7 @@ codesign --verify --deep --strict "$package_root/AmneziaWG.app"
 install -m 0755 "$working/amneziawg-daemon-control-poc" "$package_root/Daemon/amneziawg-daemon-control-poc"
 install -m 0755 "$working/amneziawg-go-daemon-control-poc" "$package_root/Daemon/amneziawg-go-daemon-control-poc"
 install -m 0755 "$root/scripts/install-daemon-control-poc.sh" "$package_root/Daemon/install-daemon-control-poc.sh"
+install -m 0755 "$root/scripts/real-profile-diagnostics.sh" "$package_root/Daemon/real-profile-diagnostics.sh"
 
 cat > "$package_root/INSTALL.md" <<EOF_INSTALL
 # Experimental unsigned AmneziaWG package
@@ -119,10 +120,16 @@ profile, run:
 
 \`sudo ./Daemon/install-daemon-control-poc.sh uninstall --uid "\$(id -u)"\`
 
-The current experimental GUI accepts only constrained IPv4 split profiles. It
-does not support full/default routes, IPv6, DNS, ExcludeIPs, hostnames,
-on-demand, or automatic updates in this CI artifact. Never put VPN
-configurations or keys in issue reports, CI logs, or this package directory.
+For a read-only route and daemon-state report, use
+\`./Daemon/real-profile-diagnostics.sh --route <local IPv4 values>\`. It never
+reads a profile, Keychain item, or UAPI socket.
+
+The installation command above enables constrained IPv4 split profiles. A
+separately reviewed full-route test requires the explicit
+\`--allow-full-route-runtime\` installer flag and its endpoint exclusions;
+see the repository's real-profile smoke guide. IPv6, DNS, hostname endpoints,
+and on-demand remain unsupported. Never put VPN configurations or keys in
+issue reports, CI logs, or this package directory.
 EOF_INSTALL
 
 sparkle_framework="$package_root/AmneziaWG.app/Contents/Frameworks/Sparkle.framework"
@@ -137,7 +144,8 @@ app_sha256=$(/usr/bin/shasum -a 256 "$package_root/AmneziaWG.app/Contents/MacOS/
 daemon_sha256=$(/usr/bin/shasum -a 256 "$package_root/Daemon/amneziawg-daemon-control-poc" | /usr/bin/awk '{print $1}')
 backend_sha256=$(/usr/bin/shasum -a 256 "$package_root/Daemon/amneziawg-go-daemon-control-poc" | /usr/bin/awk '{print $1}')
 installer_sha256=$(/usr/bin/shasum -a 256 "$package_root/Daemon/install-daemon-control-poc.sh" | /usr/bin/awk '{print $1}')
-PACKAGE_ROOT="$package_root" APP_BUNDLE_ID="$bundle_id" APP_VERSION="$version" APP_BUILD="$build" COMMIT="$commit" PROTOCOL_VERSION="$protocol_from_go" APP_SHA256="$app_sha256" DAEMON_SHA256="$daemon_sha256" BACKEND_SHA256="$backend_sha256" INSTALLER_SHA256="$installer_sha256" \
+diagnostic_sha256=$(/usr/bin/shasum -a 256 "$package_root/Daemon/real-profile-diagnostics.sh" | /usr/bin/awk '{print $1}')
+PACKAGE_ROOT="$package_root" APP_BUNDLE_ID="$bundle_id" APP_VERSION="$version" APP_BUILD="$build" COMMIT="$commit" PROTOCOL_VERSION="$protocol_from_go" APP_SHA256="$app_sha256" DAEMON_SHA256="$daemon_sha256" BACKEND_SHA256="$backend_sha256" INSTALLER_SHA256="$installer_sha256" DIAGNOSTIC_SHA256="$diagnostic_sha256" \
     python3 - <<'PY' > "$package_root/MANIFEST.json"
 import hashlib
 import json
@@ -173,6 +181,7 @@ print(json.dumps({
         "daemon_control": os.environ["DAEMON_SHA256"],
         "amneziawg_go": os.environ["BACKEND_SHA256"],
         "installer": os.environ["INSTALLER_SHA256"],
+        "diagnostic_helper": os.environ["DIAGNOSTIC_SHA256"],
     },
     "payload_sha256": payload_sha256,
     "kind": "experimental-unsigned-daemon-gui",

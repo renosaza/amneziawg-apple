@@ -27,6 +27,7 @@
 - [Free macOS `utun` POC](guides/free-macos-utun-poc.md): synthetic-only CLI experiment.
 - [Synthetic `utun` traffic POC](guides/free-macos-utun-traffic-poc.md): manual disposable-runner proof.
 - [Unsigned macOS daemon package](guides/unsigned-macos-daemon-package.md): installation and bounded GUI-update procedure.
+- [Real-profile smoke test](guides/real-profile-smoke.md): redacted operator checklist for the experimental unsigned daemon package.
 - [Single-`utun` helper POC](guides/free-macos-single-helper-poc.md): isolated root-helper start/status/stop proof.
 
 Current task status belongs in the repository's GitHub issues and pull requests. This directory records durable constraints and verified procedures only.
