@@ -36,16 +36,19 @@ func configurePlannedPhysicalEndpointRoute(target netip.Addr) (*PhysicalEndpoint
 	}
 	configured := &PhysicalEndpointRoute{target: target}
 	existing, err := configured.lookup()
-	if err != nil || existing.Err != nil || configured.isTargetHostRoute(existing) {
-		return nil, fmt.Errorf("planned endpoint preflight: %w", errors.Join(err, existing.Err))
+	if err != nil || existing.Err != nil {
+		return nil, fmt.Errorf("planned endpoint preflight-get: %w", errors.Join(err, existing.Err))
+	}
+	if configured.isTargetHostRoute(existing) {
+		return nil, errors.New("planned endpoint preflight-host-collision")
 	}
 	configured.gateway, configured.iface, err = physicalGateway(existing)
 	if err != nil {
-		return nil, fmt.Errorf("planned endpoint preflight: %w", errors.Join(err, errors.New("effective endpoint route unavailable")))
+		return nil, fmt.Errorf("planned endpoint preflight-metadata: %w", errors.Join(err, errors.New("effective endpoint route unavailable")))
 	}
 	configured.basePrefix, err = configured.findBaseRoute(target)
 	if err != nil {
-		return nil, fmt.Errorf("planned endpoint preflight: %w", err)
+		return nil, fmt.Errorf("planned endpoint preflight-rib: %w", err)
 	}
 	if err := configured.add(); err != nil {
 		return configured.cleanupFailedRouteAdd(fmt.Errorf("planned endpoint add: %w", err))
