@@ -24,12 +24,12 @@ import (
 
 const (
 	protocolVersion    = 1
-	maxFrameBytes      = 4 * 1024
+	maxFrameBytes      = 16 * 1024
 	maxProfiles        = 3
 	maxConnections     = 16
 	maxSocketPath      = 103 // Darwin sun_path has room for a trailing NUL.
 	maxConfigBytes     = 2 * 1024
-	maxRoutePlanRoutes = 16
+	maxRoutePlanRoutes = 128
 )
 
 var umaskMu sync.Mutex
@@ -57,9 +57,11 @@ type routePlanRoute struct {
 // routePlanReservation contains only the non-secret address ownership needed
 // to keep concurrently starting route-plan sessions disjoint.
 type routePlanReservation struct {
-	local    netip.Addr
-	tunnel   netip.Prefix
-	endpoint netip.Addr
+	local        netip.Addr
+	tunnel       netip.Prefix
+	tunnels      []netip.Prefix
+	endpoint     netip.Addr
+	defaultRoute bool
 }
 
 type Profile struct {
@@ -274,7 +276,14 @@ func (server *Server) plannedConflict(candidate routePlanReservation) string {
 		if candidate.local == existing.local {
 			return "planned_local_address_conflict"
 		}
-		if candidate.tunnel.Overlaps(existing.tunnel) {
+		if candidate.defaultRoute && existing.defaultRoute {
+			return "planned_route_conflict"
+		}
+		if candidate.defaultRoute && prefixContainsAny(candidate.tunnels, existing.endpoint) ||
+			existing.defaultRoute && prefixContainsAny(existing.tunnels, candidate.endpoint) {
+			return "planned_endpoint_conflict"
+		}
+		if !candidate.defaultRoute && !existing.defaultRoute && candidate.tunnel.Overlaps(existing.tunnel) {
 			return "planned_route_conflict"
 		}
 		if candidate.endpoint == existing.endpoint {
@@ -282,6 +291,15 @@ func (server *Server) plannedConflict(candidate routePlanReservation) string {
 		}
 	}
 	return ""
+}
+
+func prefixContainsAny(prefixes []netip.Prefix, address netip.Addr) bool {
+	for _, prefix := range prefixes {
+		if prefix.Contains(address) {
+			return true
+		}
+	}
+	return false
 }
 
 func routePlanReservationFor(raw json.RawMessage) (routePlanReservation, error) {
@@ -305,6 +323,9 @@ func routePlanReservationFor(raw json.RawMessage) (routePlanReservation, error) 
 		}
 		if route.Owner == "tunnel" {
 			reservation.tunnel = prefix
+			reservation.tunnels = append(reservation.tunnels, prefix)
+		} else if route.Owner == "excluded" {
+			reservation.defaultRoute = true
 		} else if route.Owner == "physicalEndpoint" {
 			reservation.endpoint = prefix.Addr()
 		}
@@ -402,7 +423,8 @@ func validRoutePlan(raw json.RawMessage) error {
 			return errors.New("invalid route plan")
 		}
 		isDefaultTunnel := route.Owner == "tunnel" && prefix.Bits() == 0 && prefix.Addr().IsUnspecified()
-		if !isDefaultTunnel && (!usableIPv4Address(prefix.Addr()) || prefix.Bits() <= 1) {
+		isFullTunnelPiece := route.Owner == "tunnel" && prefix.Bits() >= 1
+		if !isDefaultTunnel && !isFullTunnelPiece && (!usableIPv4Address(prefix.Addr()) || prefix.Bits() <= 1) {
 			return errors.New("invalid route plan")
 		}
 		if route.Owner == "tunnel" && prefix.Bits() == 0 && !isDefaultTunnel {
@@ -479,8 +501,7 @@ func validRoutePlanMatchesConfig(raw json.RawMessage, config string) error {
 	}
 	var tunnelRoute netip.Prefix
 	var physicalEndpoint netip.Addr
-	var tunnels, physicalEndpoints int
-	var hasExcludedRoutes bool
+	var tunnels, physicalEndpoints, excludedRoutes int
 	for _, route := range routes {
 		prefix, err := netip.ParsePrefix(route.Destination)
 		if err != nil {
@@ -494,19 +515,97 @@ func validRoutePlanMatchesConfig(raw json.RawMessage, config string) error {
 			physicalEndpoints++
 			physicalEndpoint = prefix.Addr()
 		case "excluded":
-			hasExcludedRoutes = true
+			excludedRoutes++
 		}
 	}
-	// ExcludeIPs is a NetworkExtension-only field and is intentionally absent
-	// from UAPI. A root daemon cannot bind an excluded route to trusted
-	// configuration, so it must reject it before any backend side effect.
-	if hasExcludedRoutes || allowedIP.Bits() == 0 {
-		return errors.New("unsupported route plan runtime")
-	}
-	if tunnels != 1 || physicalEndpoints != 1 || tunnelRoute != allowedIP || physicalEndpoint != endpoint {
+	if physicalEndpoints != 1 || physicalEndpoint != endpoint {
 		return errors.New("invalid route plan")
 	}
+	if allowedIP.Bits() == 0 {
+		if excludedRoutes == 0 || tunnels == 0 || !isIPv4ComplementOfExcludedRoutes(routes) {
+			return errors.New("invalid route plan")
+		}
+		return nil
+	}
+	if tunnels != 1 || tunnelRoute != allowedIP || allowedIP.Bits() <= 1 {
+		return errors.New("invalid route plan")
+	}
+	// A split route does not have trusted configuration for an exclusion, so
+	// only the explicitly opt-in full-route backend may receive exclusions.
+	if excludedRoutes != 0 {
+		return errors.New("unsupported route plan runtime")
+	}
 	return nil
+}
+
+func (plan routePlan) isDefaultTunnel() bool {
+	var routes []routePlanRoute
+	if json.Unmarshal(plan.Routes, &routes) != nil {
+		return false
+	}
+	for _, route := range routes {
+		if route.Owner == "excluded" {
+			return true
+		}
+	}
+	return false
+}
+
+func isIPv4ComplementOfExcludedRoutes(routes []routePlanRoute) bool {
+	excluded := make([]netip.Prefix, 0, len(routes))
+	tunnel := make(map[netip.Prefix]struct{}, len(routes))
+	for _, route := range routes {
+		prefix, err := netip.ParsePrefix(route.Destination)
+		if err != nil {
+			return false
+		}
+		switch route.Owner {
+		case "excluded":
+			excluded = append(excluded, prefix)
+		case "tunnel":
+			tunnel[prefix] = struct{}{}
+		}
+	}
+	expected := ipv4Complement(excluded)
+	if len(expected) != len(tunnel) {
+		return false
+	}
+	for _, prefix := range expected {
+		if _, found := tunnel[prefix]; !found {
+			return false
+		}
+	}
+	return true
+}
+
+func ipv4Complement(excluded []netip.Prefix) []netip.Prefix {
+	routes := []netip.Prefix{netip.PrefixFrom(netip.IPv4Unspecified(), 0)}
+	for _, exclusion := range excluded {
+		next := make([]netip.Prefix, 0, len(routes))
+		for _, route := range routes {
+			next = append(next, subtractIPv4Prefix(route, exclusion)...)
+		}
+		routes = next
+	}
+	return routes
+}
+
+func subtractIPv4Prefix(route, exclusion netip.Prefix) []netip.Prefix {
+	if !route.Overlaps(exclusion) || !route.Addr().Is4() || !exclusion.Addr().Is4() {
+		return []netip.Prefix{route}
+	}
+	if exclusion.Bits() <= route.Bits() && exclusion.Contains(route.Addr()) {
+		return nil
+	}
+	if route.Bits() >= exclusion.Bits() || !route.Contains(exclusion.Addr()) {
+		return []netip.Prefix{route}
+	}
+	left := netip.PrefixFrom(route.Addr(), route.Bits()+1).Masked()
+	rightAddress := left.Addr().As4()
+	byteIndex := route.Bits() / 8
+	rightAddress[byteIndex] |= 1 << (7 - (route.Bits() % 8))
+	right := netip.PrefixFrom(netip.AddrFrom4(rightAddress), route.Bits()+1)
+	return append(subtractIPv4Prefix(left, exclusion), subtractIPv4Prefix(right, exclusion)...)
 }
 
 func validConfig(config string) error {

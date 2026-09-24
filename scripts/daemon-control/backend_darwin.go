@@ -44,6 +44,7 @@ type tunnelBackend struct {
 	syntheticEndpointRoutes bool
 	syntheticFallbackRoute  bool
 	allowRoutePlanRuntime   bool
+	allowFullRouteRuntime   bool
 	routesMu                sync.Mutex
 	routeSlots              [len(syntheticIPv4RouteSpecs)]bool
 	lastStartStage          string
@@ -57,19 +58,20 @@ type tunnelProcess struct {
 	route                   *IPv4Route
 	endpointRoute           *PhysicalEndpointRoute
 	fallbackRoute           *SyntheticFallbackRoute
+	fullRoutes              []*SyntheticFallbackRoute
 	precedenceEndpointRoute *PhysicalEndpointRoute
 	routeSlot               int
 }
 
 func newTunnelBackend(binary string) (Backend, error) {
-	return newTunnelBackendWithRoutePlanRuntime(binary, false)
+	return newTunnelBackendWithRoutePlanRuntime(binary, false, false)
 }
 
-func newTunnelBackendWithRoutePlanRuntime(binary string, allowRoutePlans bool) (Backend, error) {
+func newTunnelBackendWithRoutePlanRuntime(binary string, allowRoutePlans, allowFullRoutes bool) (Backend, error) {
 	if os.Geteuid() != 0 || !trustedBinary(binary) {
 		return nil, errors.New("real tunnel backend requires a trusted root executable")
 	}
-	return &tunnelBackend{binary: binary, allowRoutePlanRuntime: allowRoutePlans}, nil
+	return &tunnelBackend{binary: binary, allowRoutePlanRuntime: allowRoutePlans, allowFullRouteRuntime: allowFullRoutes}, nil
 }
 
 func trustedBinary(path string) bool {
@@ -106,6 +108,9 @@ func (backend *tunnelBackend) Start(config string) (Session, error) {
 func (backend *tunnelBackend) StartWithRoutePlan(config string, plan routePlan) (Session, error) {
 	if !backend.allowRoutePlanRuntime {
 		return Session{}, errors.New("route plan runtime unavailable")
+	}
+	if plan.isDefaultTunnel() && !backend.allowFullRouteRuntime {
+		return Session{}, errors.New("full route runtime unavailable")
 	}
 	return backend.start(config, &plan)
 }
@@ -163,7 +168,7 @@ func (backend *tunnelBackend) start(config string, plan *routePlan) (Session, er
 		err = uapi(name, "set=1\n"+config)
 	}
 	if err == nil && plan != nil {
-		local, prefix, endpoint, parseErr := manualPlanValues(*plan)
+		local, routes, endpoint, fullRoute, parseErr := plannedRouteValues(*plan)
 		if parseErr != nil {
 			err = parseErr
 		} else {
@@ -177,13 +182,25 @@ func (backend *tunnelBackend) start(config string, plan *routePlan) (Session, er
 				}
 			}
 			if err == nil {
-				backend.lastStartStage = "split-route"
-				process.fallbackRoute, err = configurePlannedSplitRoute(process, prefix, process.precedenceEndpointRoute)
+				if fullRoute {
+					backend.lastStartStage = "default-route"
+					process.fullRoutes, err = configurePlannedFullRoutes(process, routes)
+				} else {
+					backend.lastStartStage = "split-route"
+					process.fallbackRoute, err = configurePlannedSplitRoute(process, routes[0], process.precedenceEndpointRoute)
+				}
 			}
 			if err == nil {
 				err = process.precedenceEndpointRoute.verify()
 			}
-			if err == nil {
+			if err == nil && fullRoute {
+				for _, route := range process.fullRoutes {
+					if err = route.verifyOrRecoverShadowed(); err != nil {
+						break
+					}
+				}
+			}
+			if err == nil && !fullRoute {
 				err = process.fallbackRoute.verify()
 			}
 			if err == nil {
@@ -213,32 +230,47 @@ func (backend *tunnelBackend) start(config string, plan *routePlan) (Session, er
 	return Session{value: process}, nil
 }
 
-func manualPlanValues(plan routePlan) (netip.Addr, netip.Prefix, netip.Addr, error) {
+func plannedRouteValues(plan routePlan) (netip.Addr, []netip.Prefix, netip.Addr, bool, error) {
 	local, err := netip.ParsePrefix(plan.LocalAddress)
 	if err != nil || local.Bits() != 32 {
-		return netip.Addr{}, netip.Prefix{}, netip.Addr{}, errors.New("invalid manual route plan")
+		return netip.Addr{}, nil, netip.Addr{}, false, errors.New("invalid planned route")
 	}
 	var routes []routePlanRoute
-	if json.Unmarshal(plan.Routes, &routes) != nil || len(routes) != 2 {
-		return netip.Addr{}, netip.Prefix{}, netip.Addr{}, errors.New("invalid manual route plan")
+	if json.Unmarshal(plan.Routes, &routes) != nil || len(routes) < 2 {
+		return netip.Addr{}, nil, netip.Addr{}, false, errors.New("invalid planned route")
 	}
-	var prefix netip.Prefix
+	var tunnelRoutes []netip.Prefix
 	var endpoint netip.Addr
+	var exclusions []netip.Prefix
+	var tunnels, endpoints int
 	for _, route := range routes {
 		parsed, err := netip.ParsePrefix(route.Destination)
 		if err != nil {
-			return netip.Addr{}, netip.Prefix{}, netip.Addr{}, err
+			return netip.Addr{}, nil, netip.Addr{}, false, err
 		}
 		if route.Owner == "tunnel" {
-			prefix = parsed
+			tunnels++
+			tunnelRoutes = append(tunnelRoutes, parsed)
 		} else if route.Owner == "physicalEndpoint" {
+			endpoints++
 			endpoint = parsed.Addr()
+		} else if route.Owner == "excluded" {
+			exclusions = append(exclusions, parsed)
 		}
 	}
-	if !local.Addr().Is4() || !local.Addr().IsGlobalUnicast() || !prefix.IsValid() || !prefix.Addr().Is4() || prefix.Bits() < 2 || !endpoint.Is4() || !endpoint.IsGlobalUnicast() {
-		return netip.Addr{}, netip.Prefix{}, netip.Addr{}, errors.New("invalid manual route plan")
+	if !local.Addr().Is4() || !usableIPv4Address(local.Addr()) || tunnels == 0 || endpoints != 1 || !endpoint.Is4() || !usableIPv4Address(endpoint) {
+		return netip.Addr{}, nil, netip.Addr{}, false, errors.New("invalid planned route")
 	}
-	return local.Addr(), prefix, endpoint, nil
+	if len(exclusions) != 0 {
+		if !isIPv4ComplementOfExcludedRoutes(routes) {
+			return netip.Addr{}, nil, netip.Addr{}, false, errors.New("invalid planned full route")
+		}
+		return local.Addr(), tunnelRoutes, endpoint, true, nil
+	}
+	if tunnels != 1 || tunnelRoutes[0].Bits() < 2 {
+		return netip.Addr{}, nil, netip.Addr{}, false, errors.New("invalid planned split route")
+	}
+	return local.Addr(), tunnelRoutes, endpoint, false, nil
 }
 
 func (backend *tunnelBackend) Status(session Session) error {
@@ -261,6 +293,9 @@ func (backend *tunnelBackend) Stop(session Session) error {
 	}
 	select {
 	case <-process.done:
+		if err := process.proveFullRoutesAbsentAfterTunnelExit(); err != nil {
+			return err
+		}
 		if err := process.closePrecedenceEndpointRoute(); err != nil {
 			return err
 		}
@@ -280,6 +315,9 @@ func (backend *tunnelBackend) Stop(session Session) error {
 			process.route = nil
 		}
 	default:
+		if err := process.closeFullRoutes(); err != nil {
+			return err
+		}
 		if err := process.closePrecedenceEndpointRoute(); err != nil {
 			return err
 		}
@@ -331,6 +369,26 @@ func (process *tunnelProcess) closePrecedenceEndpointRoute() error {
 		return err
 	}
 	process.precedenceEndpointRoute = nil
+	return nil
+}
+
+func (process *tunnelProcess) closeFullRoutes() error {
+	for index := len(process.fullRoutes) - 1; index >= 0; index-- {
+		if err := process.fullRoutes[index].Close(); err != nil {
+			return err
+		}
+	}
+	process.fullRoutes = nil
+	return nil
+}
+
+func (process *tunnelProcess) proveFullRoutesAbsentAfterTunnelExit() error {
+	for index := len(process.fullRoutes) - 1; index >= 0; index-- {
+		if err := process.fullRoutes[index].proveAbsentAfterTunnelExit(); err != nil {
+			return err
+		}
+	}
+	process.fullRoutes = nil
 	return nil
 }
 
