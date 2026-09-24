@@ -27,6 +27,7 @@ protocol_from_swift=$(/usr/bin/sed -nE 's/^[[:space:]]*static let protocolVersio
 [[ $protocol_from_go =~ ^[0-9]+$ && $protocol_from_go == "$protocol_from_swift" ]] || fail 'daemon protocol versions disagree'
 
 make -C "$root/Sources/WireGuardKitGo"
+mkdir -p "$build_products/$configuration"
 make -C "$root/Sources/WireGuardKitGo" version-header CONFIGURATION_BUILD_DIR="$build_products/$configuration"
 go build -C "$root/Sources/WireGuardKitGo" -o "$working/amneziawg-go-daemon-control-poc" github.com/amnezia-vpn/amneziawg-go/v3
 go build -C "$root/scripts/daemon-control" -o "$working/amneziawg-daemon-control-poc" ./cmd/daemon-control-poc
