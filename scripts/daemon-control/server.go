@@ -325,21 +325,25 @@ func routePlanReservationFor(raw json.RawMessage) (routePlanReservation, error) 
 		return routePlanReservation{}, errors.New("invalid route plan")
 	}
 	reservation := routePlanReservation{local: local.Addr()}
+	reservation.defaultRoute = isIPv4ComplementOfExcludedRoutes(routes)
 	for _, route := range routes {
 		prefix, err := netip.ParsePrefix(route.Destination)
 		if err != nil {
 			return routePlanReservation{}, errors.New("invalid route plan")
 		}
 		if route.Owner == "tunnel" {
-			reservation.tunnel = prefix
 			reservation.tunnels = append(reservation.tunnels, prefix)
-		} else if route.Owner == "excluded" {
-			reservation.defaultRoute = true
 		} else if route.Owner == "physicalEndpoint" {
 			reservation.endpoint = prefix.Addr()
 		}
 	}
-	if !reservation.local.IsValid() || !reservation.tunnel.IsValid() || !reservation.endpoint.IsValid() {
+	if !reservation.defaultRoute {
+		if len(reservation.tunnels) != 1 {
+			return routePlanReservation{}, errors.New("invalid route plan")
+		}
+		reservation.tunnel = reservation.tunnels[0]
+	}
+	if !reservation.local.IsValid() || len(reservation.tunnels) == 0 || !reservation.endpoint.IsValid() {
 		return routePlanReservation{}, errors.New("invalid route plan")
 	}
 	return reservation, nil
