@@ -23,8 +23,9 @@ app="$package/AmneziaWG.app"
 daemon="$package/Daemon/amneziawg-daemon-control-poc"
 backend="$package/Daemon/amneziawg-go-daemon-control-poc"
 installer="$package/Daemon/install-daemon-control-poc.sh"
+diagnostic="$package/Daemon/real-profile-diagnostics.sh"
 manifest="$package/MANIFEST.json"
-[[ -x "$app/Contents/MacOS/AmneziaWG" && -x "$daemon" && -x "$backend" && -x "$installer" && -f "$manifest" && -f "$package/INSTALL.md" ]] || {
+[[ -x "$app/Contents/MacOS/AmneziaWG" && -x "$daemon" && -x "$backend" && -x "$installer" && -x "$diagnostic" && -f "$manifest" && -f "$package/INSTALL.md" ]] || {
     echo "package contents are incomplete" >&2
     exit 1
 }
@@ -34,7 +35,9 @@ if find "$package" \( -name '*.conf' -o -name 'Developer.xcconfig' -o -name 'pro
     exit 1
 fi
 
-python3 - "$manifest" "$app/Contents/Info.plist" "$app/Contents/MacOS/AmneziaWG" "$daemon" "$backend" "$installer" <<'PY'
+"$diagnostic" --self-check
+
+python3 - "$manifest" "$app/Contents/Info.plist" "$app/Contents/MacOS/AmneziaWG" "$daemon" "$backend" "$installer" "$diagnostic" <<'PY'
 import hashlib
 import json
 import plistlib
@@ -51,7 +54,7 @@ assert manifest["app_version"] == info["CFBundleShortVersionString"]
 assert manifest["app_build"] == str(info["CFBundleVersion"])
 assert re.fullmatch(r"[0-9a-f]{40}", manifest["commit"])
 assert manifest["daemon_protocol_version"] == 1
-for key, path in zip(("app_executable", "daemon_control", "amneziawg_go", "installer"), sys.argv[3:]):
+for key, path in zip(("app_executable", "daemon_control", "amneziawg_go", "installer", "diagnostic_helper"), sys.argv[3:]):
     with open(path, "rb") as artifact:
         digest = hashlib.sha256()
         for chunk in iter(lambda: artifact.read(1024 * 1024), b""):

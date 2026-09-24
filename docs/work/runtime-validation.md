@@ -8,7 +8,7 @@ Runtime validation was not run. This machine has Command Line Tools only: `xcode
 
 ## Pending matrix
 
-Run these checks on a signed macOS build with synthetic or user-managed profiles, never committing their keys:
+Run these checks on a signed macOS build with synthetic or user-managed profiles, never committing their keys. The experimental unsigned daemon package has a separate [redacted operator checklist](../guides/real-profile-smoke.md); its synthetic CI evidence is not real-profile validation.
 
 - sticky only: confirm ordinary traffic uses its `utun` and LAN uses the physical interface;
 - sticky + CM; sticky + pdkkfc; then all three concurrently: confirm independent handshakes and RX/TX;
