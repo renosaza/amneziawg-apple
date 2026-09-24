@@ -17,7 +17,7 @@ ditto -x -k "$archive" "$stage"
 
 package=$(find "$stage" -mindepth 1 -maxdepth 1 -type d -name 'AmneziaWG-unsigned-macos-*' -print -quit)
 [[ -n $package ]] || { echo "package root is missing" >&2; exit 1; }
-[[ $(find "$stage" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ') == 1 ]] || { echo "package has unexpected roots" >&2; exit 1; }
+[[ $(find "$stage" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ') == 1 ]] || { echo "package has unexpected roots" >&2; exit 1; }
 
 app="$package/AmneziaWG.app"
 daemon="$package/Daemon/amneziawg-daemon-control-poc"
@@ -40,6 +40,7 @@ import json
 import plistlib
 import re
 import sys
+from pathlib import Path
 
 manifest = json.load(open(sys.argv[1], encoding="utf-8"))
 info = plistlib.load(open(sys.argv[2], "rb"))
@@ -56,6 +57,19 @@ for key, path in zip(("app_executable", "daemon_control", "amneziawg_go", "insta
         for chunk in iter(lambda: artifact.read(1024 * 1024), b""):
             digest.update(chunk)
         assert manifest["sha256"][key] == digest.hexdigest()
+
+root = Path(sys.argv[1]).parent
+payload_sha256 = {}
+for path in sorted(root.rglob("*")):
+    assert not path.is_symlink(), f"package contains a symbolic link: {path.relative_to(root)}"
+    assert path.is_dir() or path.is_file(), f"package contains an unexpected path: {path.relative_to(root)}"
+    if path.is_file() and path.name != "MANIFEST.json":
+        digest = hashlib.sha256()
+        with path.open("rb") as artifact:
+            for chunk in iter(lambda: artifact.read(1024 * 1024), b""):
+                digest.update(chunk)
+        payload_sha256[str(path.relative_to(root))] = digest.hexdigest()
+assert manifest["payload_sha256"] == payload_sha256
 PY
 
 echo "unsigned macOS package self-check passed"

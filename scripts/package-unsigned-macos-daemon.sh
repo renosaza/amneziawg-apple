@@ -66,14 +66,32 @@ install -m 0755 "$working/amneziawg-daemon-control-poc" "$package_root/Daemon/am
 install -m 0755 "$working/amneziawg-go-daemon-control-poc" "$package_root/Daemon/amneziawg-go-daemon-control-poc"
 install -m 0755 "$root/scripts/install-daemon-control-poc.sh" "$package_root/Daemon/install-daemon-control-poc.sh"
 
+if find "$package_root" -type l -print -quit | grep -q .; then
+    fail 'package payload contains a symbolic link'
+fi
+
 app_sha256=$(/usr/bin/shasum -a 256 "$package_root/AmneziaWG.app/Contents/MacOS/AmneziaWG" | /usr/bin/awk '{print $1}')
 daemon_sha256=$(/usr/bin/shasum -a 256 "$package_root/Daemon/amneziawg-daemon-control-poc" | /usr/bin/awk '{print $1}')
 backend_sha256=$(/usr/bin/shasum -a 256 "$package_root/Daemon/amneziawg-go-daemon-control-poc" | /usr/bin/awk '{print $1}')
 installer_sha256=$(/usr/bin/shasum -a 256 "$package_root/Daemon/install-daemon-control-poc.sh" | /usr/bin/awk '{print $1}')
-APP_BUNDLE_ID="$bundle_id" APP_VERSION="$version" APP_BUILD="$build" COMMIT="$commit" PROTOCOL_VERSION="$protocol_from_go" APP_SHA256="$app_sha256" DAEMON_SHA256="$daemon_sha256" BACKEND_SHA256="$backend_sha256" INSTALLER_SHA256="$installer_sha256" \
+PACKAGE_ROOT="$package_root" APP_BUNDLE_ID="$bundle_id" APP_VERSION="$version" APP_BUILD="$build" COMMIT="$commit" PROTOCOL_VERSION="$protocol_from_go" APP_SHA256="$app_sha256" DAEMON_SHA256="$daemon_sha256" BACKEND_SHA256="$backend_sha256" INSTALLER_SHA256="$installer_sha256" \
     python3 - <<'PY' > "$package_root/MANIFEST.json"
+import hashlib
 import json
 import os
+from pathlib import Path
+
+root = Path(os.environ["PACKAGE_ROOT"])
+payload_sha256 = {}
+for path in sorted(root.rglob("*")):
+    if path.is_symlink():
+        raise SystemExit(f"package payload contains a symbolic link: {path.relative_to(root)}")
+    if path.is_file():
+        digest = hashlib.sha256()
+        with path.open("rb") as artifact:
+            for chunk in iter(lambda: artifact.read(1024 * 1024), b""):
+                digest.update(chunk)
+        payload_sha256[str(path.relative_to(root))] = digest.hexdigest()
 
 print(json.dumps({
     "app_bundle_id": os.environ["APP_BUNDLE_ID"],
@@ -87,6 +105,7 @@ print(json.dumps({
         "amneziawg_go": os.environ["BACKEND_SHA256"],
         "installer": os.environ["INSTALLER_SHA256"],
     },
+    "payload_sha256": payload_sha256,
     "kind": "experimental-unsigned-daemon-gui",
 }, indent=2, sort_keys=True))
 PY
