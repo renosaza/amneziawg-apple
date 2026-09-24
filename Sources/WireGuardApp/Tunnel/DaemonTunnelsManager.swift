@@ -4,7 +4,7 @@
 import Foundation
 
 final class DaemonTunnelsManager: TunnelsManager {
-    private static let controlSocketPath = "/private/var/db/amneziawg-daemon-control-poc/control.sock"
+    static let controlSocketPath = "/private/var/db/amneziawg-daemon-control-poc/control.sock"
 
     private let store: DaemonProfileStore
     private let mutationQueue = DispatchQueue(label: "com.amneziawg.daemon-profile-mutations")

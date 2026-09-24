@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		7A0002012F00000100000001 /* DaemonUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A0002002F00000100000001 /* DaemonUpdater.swift */; };
+		7A0002032F00000100000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 7A0002052F00000100000001 /* Sparkle */; };
 		4E29B1C32BC1222C00824F53 /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 4E29B1C22BC1222C00824F53 /* InfoPlist.xcstrings */; };
 		4E5C5B942BA6367F00082DED /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 4E5C5B932BA6367F00082DED /* PrivacyInfo.xcprivacy */; };
 		4E5C5B962BA636B300082DED /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 4E5C5B952BA636B300082DED /* PrivacyInfo.xcprivacy */; };
@@ -382,6 +384,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		7A0002002F00000100000001 /* DaemonUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonUpdater.swift; sourceTree = "<group>"; };
 		4E29B1C22BC1222C00824F53 /* InfoPlist.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; name = InfoPlist.xcstrings; path = Sources/WireGuardApp/InfoPlist.xcstrings; sourceTree = "<group>"; };
 		4E5C5B932BA6367F00082DED /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; name = PrivacyInfo.xcprivacy; path = Sources/WireGuardApp/PrivacyInfo.xcprivacy; sourceTree = SOURCE_ROOT; };
 		4E5C5B952BA636B300082DED /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -574,6 +577,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7A0002032F00000100000001 /* Sparkle in Frameworks */,
 				7A00014E2F00000100000001 /* NetworkExtension.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -794,6 +798,7 @@
 				6FBA104421D7EA750051C35F /* ViewController */,
 				6FBA101321D613F30051C35F /* Application.swift */,
 				6FB1BD5F21D2607A00A991BF /* AppDelegate.swift */,
+				7A0002002F00000100000001 /* DaemonUpdater.swift */,
 				6F89E17921EDEB0E00C97BB9 /* StatusItemController.swift */,
 				6FBA101621D655340051C35F /* StatusMenu.swift */,
 				6F3E02E8228000F6001FE7E3 /* MainMenu.swift */,
@@ -1079,6 +1084,7 @@
 			);
 			name = WireGuardmacOSDaemon;
 			packageProductDependencies = (
+				7A0002052F00000100000001 /* Sparkle */,
 			);
 			productName = WireGuardmacOSDaemon;
 			productReference = 7A0000152F00000100000001 /* AmneziaWG Daemon.app */;
@@ -1178,6 +1184,7 @@
 			);
 			mainGroup = 6FF4AC0B211EC46F002C96EB;
 			packageReferences = (
+				7A0002042F00000100000001 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			productRefGroup = 6FF4AC15211EC46F002C96EB /* Products */;
 			projectDirPath = "";
@@ -1628,6 +1635,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7A0002012F00000100000001 /* DaemonUpdater.swift in Sources */,
 				7A0001002F00000100000001 /* DaemonControlClient.swift in Sources */,
 				7A0001012F00000100000001 /* DaemonTunnelState.swift in Sources */,
 				7A0001022F00000100000001 /* DaemonTunnelsManager.swift in Sources */,
@@ -1710,6 +1718,25 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		7A0002042F00000100000001 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.10.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		7A0002052F00000100000001 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7A0002042F00000100000001 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin PBXTargetDependency section */
 		6F5D0C21218352EF000F85AD /* PBXTargetDependency */ = {
@@ -2125,6 +2152,11 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				INFOPLIST_FILE = Sources/WireGuardApp/UI/macOS/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = AmneziaWG;
+				INFOPLIST_KEY_SUEnableAutomaticChecks = YES;
+				INFOPLIST_KEY_SUFeedURL = "$(SPARKLE_FEED_URL)";
+				INFOPLIST_KEY_SUPublicEDKey = "$(SPARKLE_PUBLIC_ED_KEY)";
+				INFOPLIST_KEY_SURequireSignedFeed = YES;
+				INFOPLIST_KEY_SUVerifyUpdateBeforeExtraction = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -2135,6 +2167,8 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DAEMON_MODE";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
+				SPARKLE_FEED_URL = "";
+				SPARKLE_PUBLIC_ED_KEY = "";
 			};
 			name = Debug;
 		};
@@ -2145,6 +2179,11 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				INFOPLIST_FILE = Sources/WireGuardApp/UI/macOS/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = AmneziaWG;
+				INFOPLIST_KEY_SUEnableAutomaticChecks = YES;
+				INFOPLIST_KEY_SUFeedURL = "$(SPARKLE_FEED_URL)";
+				INFOPLIST_KEY_SUPublicEDKey = "$(SPARKLE_PUBLIC_ED_KEY)";
+				INFOPLIST_KEY_SURequireSignedFeed = YES;
+				INFOPLIST_KEY_SUVerifyUpdateBeforeExtraction = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -2155,6 +2194,8 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DAEMON_MODE";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
+				SPARKLE_FEED_URL = "";
+				SPARKLE_PUBLIC_ED_KEY = "";
 			};
 			name = Release;
 		};

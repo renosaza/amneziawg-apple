@@ -5,6 +5,7 @@ script_dir=$(cd "$(dirname "$0")" && pwd)
 repo_dir=$(cd "$script_dir/.." && pwd)
 project="$repo_dir/WireGuard.xcodeproj/project.pbxproj"
 manager="$repo_dir/Sources/WireGuardApp/Tunnel/DaemonTunnelsManager.swift"
+updater="$repo_dir/Sources/WireGuardApp/UI/macOS/DaemonUpdater.swift"
 
 plutil -lint "$project"
 
@@ -44,5 +45,33 @@ grep -Eq 'store\.delete\(' "$manager"
 grep -Eq 'guard tunnel\.status == \.inactive else' "$manager"
 grep -Eq 'uncertainDaemonProfileIDs\.remove\(profileID\)' "$manager"
 grep -Eq 'DaemonTunnelState\.isAuthoritativelyAbsent' "$manager"
+
+grep -Fq 'sparkle-project/Sparkle' "$project"
+grep -Fq 'kind = exactVersion' "$project"
+grep -Fq 'version = 2.10.0' "$project"
+python3 - "$project" <<'PY'
+from pathlib import Path
+import sys
+
+project = Path(sys.argv[1]).read_text()
+target = project.split('7A0000102F00000100000001 /* WireGuardmacOSDaemon */ = {', 1)[1].split('\n\t\t};', 1)[0]
+assert '7A0002052F00000100000001 /* Sparkle */' in target
+for configuration in ('7A0000162F00000100000001', '7A0000172F00000100000001'):
+    block = project.split(f'{configuration} /*', 1)[1].split('\n\t\t};', 1)[0]
+    assert 'INFOPLIST_KEY_SUEnableAutomaticChecks = YES' in block
+    assert 'INFOPLIST_KEY_SURequireSignedFeed = YES' in block
+    assert 'INFOPLIST_KEY_SUVerifyUpdateBeforeExtraction = YES' in block
+PY
+
+grep -Fq 'url.scheme?.lowercased() == "https"' "$updater"
+grep -Fq 'Data(base64Encoded: publicKey)?.count == 32' "$updater"
+grep -Fq 'SPUStandardUpdaterController' "$updater"
+grep -Fq 'static func isCompatibleDaemon' "$updater"
+grep -Fq 'DaemonUpdater.isCompatibleDaemon' "$repo_dir/Sources/WireGuardApp/UI/macOS/AppDelegate.swift"
+grep -Fq 'DaemonTunnelsManager.controlSocketPath' "$repo_dir/Sources/WireGuardApp/UI/macOS/AppDelegate.swift"
+if grep -Eq 'PrivateKey|PresharedKey|HeaderProtectionKey' "$updater"; then
+    echo 'updater source must not contain VPN key material' >&2
+    exit 1
+fi
 
 echo "unsigned daemon GUI target self-check passed"
