@@ -79,6 +79,12 @@ func TestRoutePlanRequiresCanonicalIPv4LocalAddress(t *testing.T) {
 		`{"local_address":"192.0.2.2/24","routes":[]}`,
 		`{"local_address":"192.0.2.2/32,192.0.2.3/32","routes":[]}`,
 		`{"local_address":"2001:db8::2/128","routes":[]}`,
+		`{"local_address":"0.0.0.0/32","routes":[]}`,
+		`{"local_address":"0.1.2.3/32","routes":[]}`,
+		`{"local_address":"127.0.0.1/32","routes":[]}`,
+		`{"local_address":"169.254.1.1/32","routes":[]}`,
+		`{"local_address":"224.0.0.1/32","routes":[]}`,
+		`{"local_address":"255.255.255.255/32","routes":[]}`,
 	} {
 		if err := validRoutePlan([]byte(plan)); err == nil {
 			t.Fatalf("accepted invalid local address: %s", plan)

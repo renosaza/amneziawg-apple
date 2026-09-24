@@ -89,8 +89,16 @@ public struct MacOSDaemonRoutePlan: Codable, Equatable {
     }
 
     private static func localIPv4Address(_ addresses: [IPAddressRange]) -> String? {
-        guard addresses.count == 1, addresses[0].address is IPv4Address else { return nil }
-        return IPAddressRange(address: addresses[0].address, networkPrefixLength: 32).stringRepresentation
+        guard addresses.count == 1, let address = addresses[0].address as? IPv4Address,
+              isUsableLocalIPv4Address(address)
+        else { return nil }
+        return IPAddressRange(address: address, networkPrefixLength: 32).stringRepresentation
+    }
+
+    private static func isUsableLocalIPv4Address(_ address: IPv4Address) -> Bool {
+        let bytes = address.rawValue
+        return bytes[0] != 0 && bytes[0] < 224 && bytes[0] != 127 &&
+            !(bytes[0] == 169 && bytes[1] == 254)
     }
 
     private static func endpointRange(_ endpoint: Endpoint) -> IPAddressRange? {

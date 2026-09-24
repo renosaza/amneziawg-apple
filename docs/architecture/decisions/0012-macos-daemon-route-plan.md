@@ -15,10 +15,12 @@ constraints:
 `MacOSDaemonRoutePlan` is a pure per-session `WireGuardKit` model. It receives
 one activating configuration, its peer-aligned resolved endpoints, and active
 configurations only for conflict validation. It describes exactly one local
-IPv4 interface address as a canonical `/32`, normalized activating tunnel
-CIDRs, and literal endpoint CIDRs with a destination and owner kind. A source
-interface CIDR is accepted only to derive its host `/32`. It does not receive
-keys, gateways, interface names, profile names, endpoint ports, or
+usable IPv4 interface address as a canonical `/32`, normalized activating
+tunnel CIDRs, and literal endpoint CIDRs with a destination and owner kind. A
+source interface CIDR is accepted only to derive its host `/32`; `0/8`,
+loopback, link-local, multicast, and `240/4` including broadcast addresses
+are rejected, while private and TEST-NET addresses remain valid. It does not
+receive keys, gateways, interface names, profile names, endpoint ports, or
 configuration text.
 
 The plan is a deterministic route set. A future consumer must apply

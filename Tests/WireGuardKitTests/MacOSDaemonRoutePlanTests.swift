@@ -62,8 +62,12 @@ final class MacOSDaemonRoutePlanTests: XCTestCase {
         XCTAssertEqual(plan.localAddress, "10.25.0.2/32")
     }
 
-    func testRejectsMissingMultipleAndIPv6InterfaceAddresses() {
-        for addresses in [[], ["10.25.0.2/24", "10.25.0.3/24"], ["2001:db8::2/64"]] {
+    func testRejectsMissingMultipleIPv6AndUnsuitableInterfaceAddresses() {
+        for addresses in [
+            [], ["10.25.0.2/24", "10.25.0.3/24"], ["2001:db8::2/64"],
+            ["0.0.0.0/32"], ["0.1.2.3/32"], ["127.0.0.1/32"],
+            ["169.254.1.1/32"], ["224.0.0.1/32"], ["255.255.255.255/32"]
+        ] {
             let result = MacOSDaemonRoutePlan.build(
                 activating: "CM", configuration: configuration(allowed: ["10.25.0.0/24"], address: addresses),
                 resolvedEndpoints: [nil], activeTunnels: [])
