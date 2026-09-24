@@ -33,7 +33,7 @@ final class MacOSDaemonRoutePlanTests: XCTestCase {
 
         let plan = try result.get()
         XCTAssertTrue(plan.routes.contains(.init(destination: "192.0.2.10/32", owner: .physicalEndpoint)))
-        XCTAssertTrue(plan.routes.contains(.init(destination: "192.0.2.10/32", owner: .physicalExcluded)))
+        XCTAssertFalse(plan.routes.contains(.init(destination: "192.0.2.10/32", owner: .physicalExcluded)))
         XCTAssertFalse(plan.routes.contains(.init(destination: "192.0.2.10/32", owner: .tunnel)))
     }
 

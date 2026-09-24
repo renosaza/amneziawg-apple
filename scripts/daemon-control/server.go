@@ -389,7 +389,7 @@ func validRoutePlan(raw json.RawMessage) error {
 	if len(routes) > maxRoutePlanRoutes {
 		return errors.New("invalid route plan")
 	}
-	seen := make(map[routePlanRoute]struct{}, len(routes))
+	seen := make(map[netip.Prefix]struct{}, len(routes))
 	for _, route := range routes {
 		prefix, err := netip.ParsePrefix(route.Destination)
 		if err != nil || !prefix.Addr().Is4() || prefix != prefix.Masked() || prefix.String() != route.Destination {
@@ -408,10 +408,10 @@ func validRoutePlan(raw json.RawMessage) error {
 		if route.Owner == "physicalEndpoint" && prefix.Bits() != 32 {
 			return errors.New("invalid route plan")
 		}
-		if _, duplicate := seen[route]; duplicate {
+		if _, duplicate := seen[prefix]; duplicate {
 			return errors.New("invalid route plan")
 		}
-		seen[route] = struct{}{}
+		seen[prefix] = struct{}{}
 	}
 	return nil
 }

@@ -111,9 +111,6 @@ public struct MacOSDaemonRoutePlan: Codable, Equatable {
             Route(destination: $0.stringRepresentation, owner: .tunnel)
         }
         for (peer, resolvedEndpoint) in zip(configuration.peers, resolvedEndpoints) {
-            routes += peer.excludeIPs.map {
-                Route(destination: $0.stringRepresentation, owner: .physicalExcluded)
-            }
             guard let configuredEndpoint = peer.endpoint else {
                 guard resolvedEndpoint == nil else { return .failure(.invalidResolvedEndpoints) }
                 continue
@@ -125,6 +122,15 @@ public struct MacOSDaemonRoutePlan: Codable, Equatable {
                 return .failure(.invalidResolvedEndpoints)
             }
             routes.append(Route(destination: route.stringRepresentation, owner: .physicalEndpoint))
+        }
+        let endpointDestinations = Set(routes.compactMap { route in
+            route.owner == .physicalEndpoint ? route.destination : nil
+        })
+        routes += configuration.peers.flatMap { peer in
+            peer.excludeIPs.compactMap { exclusion in
+                endpointDestinations.contains(exclusion.stringRepresentation) ? nil :
+                    Route(destination: exclusion.stringRepresentation, owner: .physicalExcluded)
+            }
         }
         return .success(MacOSDaemonRoutePlan(localAddress: localAddress, routes: Array(Set(routes)).sorted {
             $0.destination == $1.destination ?

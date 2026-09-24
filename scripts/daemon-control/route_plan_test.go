@@ -218,6 +218,13 @@ func TestRoutePlanBoundaryRejectsUnsupportedInput(t *testing.T) {
 	}
 }
 
+func TestRoutePlanRejectsTwoOwnersForDestination(t *testing.T) {
+	plan := []byte(`{"local_address":"10.25.0.2/32","routes":[{"destination":"192.0.2.10/32","owner":"tunnel"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"}]}`)
+	if err := validRoutePlan(plan); err == nil {
+		t.Fatal("accepted two owners for one destination")
+	}
+}
+
 func TestFullAndExcludedRoutePlansDoNotReachBackend(t *testing.T) {
 	backend := &fakeBackend{}
 	server, err := NewServerWithBackend(501, backend)
