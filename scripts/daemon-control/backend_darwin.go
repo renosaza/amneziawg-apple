@@ -115,6 +115,13 @@ func (backend *tunnelBackend) StartWithRoutePlan(config string, plan routePlan) 
 	return backend.start(config, &plan)
 }
 
+func (backend *tunnelBackend) capabilities() []string {
+	if backend.allowRoutePlanRuntime && backend.allowFullRouteRuntime {
+		return []string{"ipv4-full-route"}
+	}
+	return nil
+}
+
 func isManualRoutePlan(plan routePlan) bool {
 	if plan.LocalAddress != "192.0.2.2/32" {
 		return false
@@ -241,7 +248,6 @@ func plannedRouteValues(plan routePlan) (netip.Addr, []netip.Prefix, netip.Addr,
 	}
 	var tunnelRoutes []netip.Prefix
 	var endpoint netip.Addr
-	var exclusions []netip.Prefix
 	var tunnels, endpoints int
 	for _, route := range routes {
 		parsed, err := netip.ParsePrefix(route.Destination)
@@ -254,17 +260,12 @@ func plannedRouteValues(plan routePlan) (netip.Addr, []netip.Prefix, netip.Addr,
 		} else if route.Owner == "physicalEndpoint" {
 			endpoints++
 			endpoint = parsed.Addr()
-		} else if route.Owner == "excluded" {
-			exclusions = append(exclusions, parsed)
 		}
 	}
 	if !local.Addr().Is4() || !usableIPv4Address(local.Addr()) || tunnels == 0 || endpoints != 1 || !endpoint.Is4() || !usableIPv4Address(endpoint) {
 		return netip.Addr{}, nil, netip.Addr{}, false, errors.New("invalid planned route")
 	}
-	if len(exclusions) != 0 {
-		if !isIPv4ComplementOfExcludedRoutes(routes) {
-			return netip.Addr{}, nil, netip.Addr{}, false, errors.New("invalid planned full route")
-		}
+	if isIPv4ComplementOfExcludedRoutes(routes) {
 		return local.Addr(), tunnelRoutes, endpoint, true, nil
 	}
 	if tunnels != 1 || tunnelRoutes[0].Bits() < 2 {

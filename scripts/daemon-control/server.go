@@ -73,6 +73,7 @@ type response struct {
 	OK              bool      `json:"ok"`
 	Error           string    `json:"error,omitempty"`
 	ProtocolVersion int       `json:"protocol_version,omitempty"`
+	Capabilities    []string  `json:"capabilities,omitempty"`
 	Profile         *Profile  `json:"profile,omitempty"`
 	Profiles        []Profile `json:"profiles,omitempty"`
 }
@@ -147,7 +148,7 @@ func (server *Server) apply(request request) response {
 
 	switch request.Operation {
 	case "hello":
-		return response{OK: true, ProtocolVersion: protocolVersion}
+		return response{OK: true, ProtocolVersion: protocolVersion, Capabilities: server.capabilities()}
 	case "list":
 		profiles := make([]Profile, 0, len(server.profiles))
 		for id, session := range server.profiles {
@@ -229,6 +230,14 @@ func (server *Server) apply(request request) response {
 	default:
 		return response{Error: "invalid_request"}
 	}
+}
+
+func (server *Server) capabilities() []string {
+	backend, ok := server.backend.(capabilityBackend)
+	if !ok {
+		return nil
+	}
+	return backend.capabilities()
 }
 
 func (server *Server) start(request request) (Session, error) {
@@ -522,7 +531,7 @@ func validRoutePlanMatchesConfig(raw json.RawMessage, config string) error {
 		return errors.New("invalid route plan")
 	}
 	if allowedIP.Bits() == 0 {
-		if excludedRoutes == 0 || tunnels == 0 || !isIPv4ComplementOfExcludedRoutes(routes) {
+		if tunnels == 0 || !isIPv4ComplementOfExcludedRoutes(routes) {
 			return errors.New("invalid route plan")
 		}
 		return nil
@@ -543,12 +552,7 @@ func (plan routePlan) isDefaultTunnel() bool {
 	if json.Unmarshal(plan.Routes, &routes) != nil {
 		return false
 	}
-	for _, route := range routes {
-		if route.Owner == "excluded" {
-			return true
-		}
-	}
-	return false
+	return isIPv4ComplementOfExcludedRoutes(routes)
 }
 
 func isIPv4ComplementOfExcludedRoutes(routes []routePlanRoute) bool {
@@ -562,10 +566,18 @@ func isIPv4ComplementOfExcludedRoutes(routes []routePlanRoute) bool {
 		switch route.Owner {
 		case "excluded":
 			excluded = append(excluded, prefix)
+		case "physicalEndpoint":
+			// A full-plan endpoint is always excluded from the tunnel
+			// complement. This is the sole accepted full-plan encoding.
+			excluded = append(excluded, prefix)
 		case "tunnel":
 			tunnel[prefix] = struct{}{}
 		}
 	}
+	return matchesIPv4TunnelComplement(tunnel, excluded)
+}
+
+func matchesIPv4TunnelComplement(tunnel map[netip.Prefix]struct{}, excluded []netip.Prefix) bool {
 	expected := ipv4TunnelComplement(excluded)
 	if len(expected) != len(tunnel) {
 		return false

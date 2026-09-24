@@ -20,6 +20,12 @@ type routePlanBackend interface {
 	StartWithRoutePlan(config string, plan routePlan) (Session, error)
 }
 
+// capabilityBackend advertises only features enabled by root-controlled daemon
+// startup flags. IPC clients cannot opt in to a capability.
+type capabilityBackend interface {
+	capabilities() []string
+}
+
 type memoryBackend struct{}
 
 func (memoryBackend) Start(string) (Session, error) { return Session{}, nil }

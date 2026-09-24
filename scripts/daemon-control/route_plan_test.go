@@ -258,6 +258,9 @@ func TestFullRoutePlanReachesOnlyRoutePlanBackend(t *testing.T) {
 
 func TestFullRoutePlanRequiresCanonicalComplement(t *testing.T) {
 	config := "private_key=synthetic\npublic_key=peer\nallowed_ip=0.0.0.0/0\nendpoint=192.0.2.10:51820"
+	if err := validRoutePlanMatchesConfig([]byte(fullPlanJSON(t, nil)), config); err != nil {
+		t.Fatalf("endpoint-only full plan: %v", err)
+	}
 	valid := fullPlanJSON(t, []string{"192.0.2.0/31"})
 	if err := validRoutePlanMatchesConfig([]byte(valid), config); err != nil {
 		t.Fatalf("valid full plan: %v", err)
@@ -384,8 +387,11 @@ func fullPlanJSON(t *testing.T, excluded []string) string {
 	for _, value := range excluded {
 		prefixes = append(prefixes, netip.MustParsePrefix(value))
 	}
-	routes := make([]routePlanRoute, 0, len(prefixes)+len(ipv4TunnelComplement(prefixes))+1)
-	for _, prefix := range ipv4TunnelComplement(prefixes) {
+	// The endpoint is a physical route and must also be absent from all full
+	// tunnel pieces. Keep this as the sole protocol encoding.
+	complement := append(append([]netip.Prefix(nil), prefixes...), netip.MustParsePrefix("192.0.2.10/32"))
+	routes := make([]routePlanRoute, 0, len(prefixes)+len(ipv4TunnelComplement(complement))+1)
+	for _, prefix := range ipv4TunnelComplement(complement) {
 		routes = append(routes, routePlanRoute{Destination: prefix.String(), Owner: "tunnel"})
 	}
 	for _, prefix := range prefixes {

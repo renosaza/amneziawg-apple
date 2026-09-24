@@ -35,6 +35,30 @@ type fakeBackend struct {
 	returnSessionOnFailure bool
 }
 
+type capabilityFakeBackend struct {
+	fakeBackend
+	values []string
+}
+
+func (backend *capabilityFakeBackend) capabilities() []string { return backend.values }
+
+func TestHelloReportsOnlyBackendCapabilities(t *testing.T) {
+	server, err := NewServerWithBackend(501, &fakeBackend{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response := server.apply(request{Operation: "hello"}); len(response.Capabilities) != 0 {
+		t.Fatalf("unexpected default capabilities: %#v", response)
+	}
+	server, err = NewServerWithBackend(501, &capabilityFakeBackend{values: []string{"ipv4-full-route"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response := server.apply(request{Operation: "hello"}); len(response.Capabilities) != 1 || response.Capabilities[0] != "ipv4-full-route" {
+		t.Fatalf("capability not advertised: %#v", response)
+	}
+}
+
 func (backend *fakeBackend) Start(config string) (Session, error) {
 	backend.mu.Lock()
 	defer backend.mu.Unlock()
