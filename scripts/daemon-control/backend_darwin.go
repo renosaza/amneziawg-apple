@@ -113,7 +113,17 @@ func isManualRoutePlan(plan routePlan) bool {
 	if json.Unmarshal(plan.Routes, &routes) != nil || len(routes) != 2 {
 		return false
 	}
-	return routes[0].Destination == "198.51.100.0/24" && routes[0].Owner == "tunnel" && routes[1].Destination == "198.51.100.10/32" && routes[1].Owner == "physicalEndpoint"
+	expected := map[routePlanRoute]bool{
+		{Destination: "198.51.100.0/24", Owner: "tunnel"}:            true,
+		{Destination: "198.51.100.10/32", Owner: "physicalEndpoint"}: true,
+	}
+	for _, route := range routes {
+		if !expected[route] {
+			return false
+		}
+		delete(expected, route)
+	}
+	return len(expected) == 0
 }
 
 func (backend *tunnelBackend) start(config string, plan *routePlan) (Session, error) {

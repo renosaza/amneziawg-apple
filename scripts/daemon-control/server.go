@@ -202,7 +202,7 @@ func (server *Server) start(request request) (Session, error) {
 	}
 	backend, ok := server.backend.(routePlanBackend)
 	if !ok {
-		return server.backend.Start(request.Config)
+		return Session{}, errors.New("route plan backend unavailable")
 	}
 	var plan routePlan
 	if err := json.Unmarshal(request.RoutePlan, &plan); err != nil {

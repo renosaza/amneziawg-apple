@@ -4,7 +4,17 @@
 
 package daemoncontrol
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestManualRoutePlanAcceptsRouteOrder(t *testing.T) {
+	plan := routePlan{LocalAddress: "192.0.2.2/32", Routes: json.RawMessage(`[{"destination":"198.51.100.10/32","owner":"physicalEndpoint"},{"destination":"198.51.100.0/24","owner":"tunnel"}]`)}
+	if !isManualRoutePlan(plan) {
+		t.Fatal("rejected reversed fixed manual route plan")
+	}
+}
 
 func TestTunnelBackendDefaultsToNoSyntheticRoutes(t *testing.T) {
 	backend := &tunnelBackend{}

@@ -17,14 +17,11 @@ func TestRoutePlanStartIsValidatedBeforeBackendStart(t *testing.T) {
 	config := "private_key=synthetic\nallowed_ip=192.0.2.0/24\nendpoint=192.0.2.10:51820"
 	valid := `{"local_address":"192.0.2.2/32","routes":[{"destination":"192.0.2.0/24","owner":"tunnel"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"}]}`
 	response := exchange(t, server, 501, requestFrame(t, fmt.Sprintf(`{"version":1,"operation":"start","profile_id":"%s","config":%q,"route_plan":%s}`, profileID, config, valid)))
-	if !response.OK {
-		t.Fatalf("valid plan: %#v", response)
+	if response.OK || response.Error != "start_failed" {
+		t.Fatalf("unsupported backend accepted plan: %#v", response)
 	}
-	if starts, _ := backend.counts(); starts != 1 {
+	if starts, _ := backend.counts(); starts != 0 {
 		t.Fatalf("starts=%d", starts)
-	}
-	if response := server.apply(request{Operation: "stop", ProfileID: profileID}); !response.OK {
-		t.Fatalf("stop: %#v", response)
 	}
 
 	invalid := `{"routes":[{"destination":"0.0.0.0/0","owner":"tunnel"}]}`
@@ -32,7 +29,7 @@ func TestRoutePlanStartIsValidatedBeforeBackendStart(t *testing.T) {
 	if response.OK || response.Error != "invalid_request" {
 		t.Fatalf("invalid plan: %#v", response)
 	}
-	if starts, _ := backend.counts(); starts != 1 {
+	if starts, _ := backend.counts(); starts != 0 {
 		t.Fatalf("invalid plan reached backend: starts=%d", starts)
 	}
 }
@@ -109,10 +106,10 @@ func TestRoutePlanMustMatchUAPIBeforeBackendStart(t *testing.T) {
 		`{"version":1,"operation":"start","profile_id":"%s","config":%q,"route_plan":%s}`,
 		profileID, config, validPlan,
 	)))
-	if !response.OK {
-		t.Fatalf("valid multi-peer plan: %#v", response)
+	if response.OK || response.Error != "start_failed" {
+		t.Fatalf("unsupported backend accepted multi-peer plan: %#v", response)
 	}
-	if starts, _ := backend.counts(); starts != 1 {
+	if starts, _ := backend.counts(); starts != 0 {
 		t.Fatalf("starts=%d", starts)
 	}
 
@@ -136,7 +133,7 @@ func TestRoutePlanMustMatchUAPIBeforeBackendStart(t *testing.T) {
 		if strings.Contains(fmt.Sprintf("%#v", response), secret) {
 			t.Fatalf("invalid plan %d leaked config", index)
 		}
-		if starts, _ := backend.counts(); starts != 1 {
+		if starts, _ := backend.counts(); starts != 0 {
 			t.Fatalf("invalid plan %d reached backend: starts=%d", index, starts)
 		}
 	}
