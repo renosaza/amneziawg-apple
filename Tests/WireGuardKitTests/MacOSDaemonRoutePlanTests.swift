@@ -85,7 +85,8 @@ final class MacOSDaemonRoutePlanTests: XCTestCase {
         XCTAssertTrue(plan.routes.contains(.init(destination: "0.0.0.0/0", owner: .tunnel)))
         XCTAssertFalse(plan.routes.contains(.init(destination: "::/0", owner: .tunnel)))
         let serialized = String(data: try JSONEncoder().encode(plan), encoding: .utf8)!
-        XCTAssertTrue(serialized.contains(#""local_address":"192.0.2.2/32""#))
+        let JSON = try JSONSerialization.jsonObject(with: Data(serialized.utf8)) as? [String: Any]
+        XCTAssertEqual(JSON?["local_address"] as? String, "192.0.2.2/32")
         XCTAssertFalse(serialized.contains(activating.interface.privateKey.base64Key))
         XCTAssertFalse(serialized.contains(activating.peers[0].preSharedKey!.base64Key))
         XCTAssertFalse(serialized.contains(active.peers[0].publicKey.base64Key))
