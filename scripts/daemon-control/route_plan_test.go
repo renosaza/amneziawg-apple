@@ -238,7 +238,7 @@ func TestFullAndExcludedRoutePlansDoNotReachBackend(t *testing.T) {
 		},
 		{
 			config: "private_key=synthetic\npublic_key=peer\nallowed_ip=10.25.0.0/24\nendpoint=192.0.2.10:51820",
-			plan:   `{"local_address":"10.25.0.2/32","routes":[{"destination":"10.25.0.0/24","owner":"tunnel"},{"destination":"192.168.31.0/24","owner":"physicalExcluded"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"}]}`,
+			plan:   `{"local_address":"10.25.0.2/32","routes":[{"destination":"10.25.0.0/24","owner":"tunnel"},{"destination":"192.168.31.0/24","owner":"excluded"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"}]}`,
 		},
 	}
 	for index, candidate := range requests {

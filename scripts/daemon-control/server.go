@@ -398,7 +398,7 @@ func validRoutePlan(raw json.RawMessage) error {
 		if err != nil || !prefix.Addr().Is4() || prefix != prefix.Masked() || prefix.String() != route.Destination {
 			return errors.New("invalid route plan")
 		}
-		if route.Owner != "tunnel" && route.Owner != "physicalEndpoint" && route.Owner != "physicalExcluded" {
+		if route.Owner != "tunnel" && route.Owner != "physicalEndpoint" && route.Owner != "excluded" {
 			return errors.New("invalid route plan")
 		}
 		isDefaultTunnel := route.Owner == "tunnel" && prefix.Bits() == 0 && prefix.Addr().IsUnspecified()
@@ -480,7 +480,7 @@ func validRoutePlanMatchesConfig(raw json.RawMessage, config string) error {
 	var tunnelRoute netip.Prefix
 	var physicalEndpoint netip.Addr
 	var tunnels, physicalEndpoints int
-	var hasPhysicalExclusions bool
+	var hasExcludedRoutes bool
 	for _, route := range routes {
 		prefix, err := netip.ParsePrefix(route.Destination)
 		if err != nil {
@@ -493,14 +493,14 @@ func validRoutePlanMatchesConfig(raw json.RawMessage, config string) error {
 		case "physicalEndpoint":
 			physicalEndpoints++
 			physicalEndpoint = prefix.Addr()
-		case "physicalExcluded":
-			hasPhysicalExclusions = true
+		case "excluded":
+			hasExcludedRoutes = true
 		}
 	}
 	// ExcludeIPs is a NetworkExtension-only field and is intentionally absent
-	// from UAPI. A root daemon cannot bind a physicalExcluded route to trusted
+	// from UAPI. A root daemon cannot bind an excluded route to trusted
 	// configuration, so it must reject it before any backend side effect.
-	if hasPhysicalExclusions || allowedIP.Bits() == 0 {
+	if hasExcludedRoutes || allowedIP.Bits() == 0 {
 		return errors.New("unsupported route plan runtime")
 	}
 	if tunnels != 1 || physicalEndpoints != 1 || tunnelRoute != allowedIP || physicalEndpoint != endpoint {

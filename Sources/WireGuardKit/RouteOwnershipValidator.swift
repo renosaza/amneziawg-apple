@@ -33,9 +33,9 @@ public struct MacOSDaemonRoutePlan: Codable, Equatable {
     public enum Owner: String, Codable, Hashable {
         case tunnel
         case physicalEndpoint
-        // A route excluded from a full-tunnel profile. This is model-only until
-        // the daemon can bind it to trusted profile data and apply it safely.
-        case physicalExcluded
+        // A route excluded from a full-tunnel profile. It has no owner by
+        // itself: a more-specific active tunnel may own it.
+        case excluded
     }
 
     public struct Route: Codable, Equatable, Hashable {
@@ -129,7 +129,7 @@ public struct MacOSDaemonRoutePlan: Codable, Equatable {
         routes += configuration.peers.flatMap { peer in
             peer.excludeIPs.compactMap { exclusion in
                 endpointDestinations.contains(exclusion.stringRepresentation) ? nil :
-                    Route(destination: exclusion.stringRepresentation, owner: .physicalExcluded)
+                    Route(destination: exclusion.stringRepresentation, owner: .excluded)
             }
         }
         return .success(MacOSDaemonRoutePlan(localAddress: localAddress, routes: Array(Set(routes)).sorted {
