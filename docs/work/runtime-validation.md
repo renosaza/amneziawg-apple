@@ -1,10 +1,26 @@
 # macOS runtime validation
 
-Revision: `multitunnel-fork` after the patch series recorded in `docs/UPSTREAM.md`.
+Revision: `82d7bec34c192ebf70b42e2b931e81893478f7fd` (`origin/master`, 2026-09-25).
 
 ## Result
 
-Runtime validation was not run. This machine has Command Line Tools only: `xcodebuild -version` reports that the active developer directory is `/Library/Developer/CommandLineTools`, so it cannot build or launch the macOS application. No local VPN profiles were supplied or used.
+PRs #62, #63 and #64 are merged. GitHub Actions run `36060320815` for this revision succeeded.
+
+The signed v4 diagnostic package built from this revision was installed from the local artifact and its daemon hash matched the artifact manifest. The v4 test GUI opened. A single CM activation attempt then showed **Daemon state needs attention** while CM remained **Reactivating**.
+
+Read-only checks after that attempt found the official full tunnel still carried `1.1.1.1` through `utun4`; the CM endpoint and `10.25.0.1` both resolved through the physical interface, so no CM route was installed. The POC idle check succeeded.
+
+The v4 daemon diagnostics have not yet been collected. Do not retry CM before collecting the tail of `/private/var/db/amneziawg-daemon-control-poc/diagnostics.jsonl`; an earlier v2 observation of an unknown physical-endpoint lookup does not establish the v4 cause.
+
+## Handoff
+
+Next action, performed by the local user because it requires `sudo`:
+
+```sh
+sudo tail -n 25 /private/var/db/amneziawg-daemon-control-poc/diagnostics.jsonl
+```
+
+Inspect that output for the v4 attempt, then diagnose before another CM activation. Keep the official tunnel active and preserve the requirement that corporate endpoints use the physical uplink.
 
 ## Pending matrix
 
