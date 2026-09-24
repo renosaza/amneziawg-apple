@@ -39,6 +39,9 @@ func TestSyntheticEndpointRouteTargetsAreDistinct(t *testing.T) {
 		}
 		seen[endpoint.String()] = true
 	}
+	if seen[syntheticPhysicalProbe.String()] || syntheticPrecedencePrefix.Contains(syntheticPhysicalProbe) {
+		t.Fatal("physical gateway probe collides with a synthetic endpoint or fallback route")
+	}
 }
 
 func TestSyntheticPhysicalEndpointOwnership(t *testing.T) {
