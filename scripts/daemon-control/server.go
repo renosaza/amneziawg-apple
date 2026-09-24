@@ -29,7 +29,7 @@ const (
 	maxConnections     = 16
 	maxSocketPath      = 103 // Darwin sun_path has room for a trailing NUL.
 	maxConfigBytes     = 2 * 1024
-	maxRoutePlanRoutes = 128
+	maxRoutePlanRoutes = 160
 )
 
 var umaskMu sync.Mutex
@@ -566,7 +566,7 @@ func isIPv4ComplementOfExcludedRoutes(routes []routePlanRoute) bool {
 			tunnel[prefix] = struct{}{}
 		}
 	}
-	expected := ipv4Complement(excluded)
+	expected := ipv4TunnelComplement(excluded)
 	if len(expected) != len(tunnel) {
 		return false
 	}
@@ -580,6 +580,27 @@ func isIPv4ComplementOfExcludedRoutes(routes []routePlanRoute) bool {
 
 func ipv4Complement(excluded []netip.Prefix) []netip.Prefix {
 	routes := []netip.Prefix{netip.PrefixFrom(netip.IPv4Unspecified(), 0)}
+	for _, exclusion := range excluded {
+		next := make([]netip.Prefix, 0, len(routes))
+		for _, route := range routes {
+			next = append(next, subtractIPv4Prefix(route, exclusion)...)
+		}
+		routes = next
+	}
+	return routes
+}
+
+// ipv4TunnelComplement deliberately keeps ranges that cannot be normal
+// unicast internet destinations out of a root-controlled full route. It is a
+// daemon safety boundary; the unprivileged IPC plan must match it exactly.
+func ipv4TunnelComplement(excluded []netip.Prefix) []netip.Prefix {
+	reserved := []netip.Prefix{
+		netip.MustParsePrefix("0.0.0.0/8"),
+		netip.MustParsePrefix("127.0.0.0/8"),
+		netip.MustParsePrefix("169.254.0.0/16"),
+		netip.MustParsePrefix("224.0.0.0/3"),
+	}
+	routes := ipv4Complement(reserved)
 	for _, exclusion := range excluded {
 		next := make([]netip.Prefix, 0, len(routes))
 		for _, route := range routes {

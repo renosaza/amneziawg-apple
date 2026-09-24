@@ -33,7 +33,9 @@ both root-controlled launch flags, `--allow-route-plan-runtime` and
 For a logical IPv4 `0.0.0.0/0`, the daemon requires a canonical route plan
 whose tunnel routes are the complement of its neutral `excluded` prefixes.
 It installs those non-default tunnel prefixes, preserving the physical default
-route. It does not add a physical route for an exclusion. Therefore LAN keeps
+route. The daemon also excludes `0/8`, `127/8`, `169.254/16`, and `224/3`
+from this root-controlled complement, so it only claims ordinary IPv4 unicast
+traffic. It does not add a physical route for an exclusion. Therefore LAN keeps
 its connected physical route and a corporate split route can start or stop in
 either order without a same-prefix ownership handoff. The full plan is refused
 if an active peer endpoint falls inside its effective tunnel prefixes, or if a

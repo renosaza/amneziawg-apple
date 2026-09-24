@@ -328,7 +328,7 @@ func TestFullRouteRejectsUnexcludedActivePeerEndpointInBothOrders(t *testing.T) 
 
 func TestIPv4ComplementPreservesExclusions(t *testing.T) {
 	excluded := []netip.Prefix{netip.MustParsePrefix("192.0.2.0/31"), netip.MustParsePrefix("198.51.100.10/32")}
-	routes := ipv4Complement(excluded)
+	routes := ipv4TunnelComplement(excluded)
 	if len(routes) == 0 || len(routes) > maxRoutePlanRoutes {
 		t.Fatalf("complement route count=%d", len(routes))
 	}
@@ -337,6 +337,16 @@ func TestIPv4ComplementPreservesExclusions(t *testing.T) {
 			if route.Overlaps(exclusion) {
 				t.Fatalf("%s overlaps %s", route, exclusion)
 			}
+		}
+	}
+	for _, reserved := range []netip.Prefix{
+		netip.MustParsePrefix("0.0.0.0/8"),
+		netip.MustParsePrefix("127.0.0.0/8"),
+		netip.MustParsePrefix("169.254.0.0/16"),
+		netip.MustParsePrefix("224.0.0.0/3"),
+	} {
+		if containsIPv4Prefix(routes, reserved.Addr()) {
+			t.Fatalf("tunnel complement captured reserved %s", reserved)
 		}
 	}
 	for _, address := range []netip.Addr{netip.MustParseAddr("1.1.1.1"), netip.MustParseAddr("203.0.113.1")} {
@@ -354,7 +364,7 @@ func TestFullRouteComplementFitsProtocolCap(t *testing.T) {
 		netip.MustParsePrefix("198.51.100.18/32"),
 		netip.MustParsePrefix("203.0.113.103/32"),
 	}
-	if count := len(ipv4Complement(excluded)); count > maxRoutePlanRoutes {
+	if count := len(ipv4TunnelComplement(excluded)); count > maxRoutePlanRoutes {
 		t.Fatalf("five IPv4 exclusions need %d routes; cap=%d", count, maxRoutePlanRoutes)
 	}
 }
@@ -374,8 +384,8 @@ func fullPlanJSON(t *testing.T, excluded []string) string {
 	for _, value := range excluded {
 		prefixes = append(prefixes, netip.MustParsePrefix(value))
 	}
-	routes := make([]routePlanRoute, 0, len(prefixes)+len(ipv4Complement(prefixes))+1)
-	for _, prefix := range ipv4Complement(prefixes) {
+	routes := make([]routePlanRoute, 0, len(prefixes)+len(ipv4TunnelComplement(prefixes))+1)
+	for _, prefix := range ipv4TunnelComplement(prefixes) {
 		routes = append(routes, routePlanRoute{Destination: prefix.String(), Owner: "tunnel"})
 	}
 	for _, prefix := range prefixes {
