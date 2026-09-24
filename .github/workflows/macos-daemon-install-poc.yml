@@ -16,7 +16,7 @@ jobs:
         with:
           go-version-file: scripts/daemon-control/go.mod
           cache-dependency-path: scripts/daemon-control/go.sum
-      - name: Install, query, and uninstall the synthetic daemon on the disposable runner
+      - name: Install, start one TEST-NET route plan, and uninstall the synthetic daemon
         shell: bash
         run: |
           set -euo pipefail
@@ -24,18 +24,82 @@ jobs:
           go build -C Sources/WireGuardKitGo -o ../../out/amneziawg-go github.com/amnezia-vpn/amneziawg-go/v3
           go build -C scripts/daemon-control -o ../../out/amneziawg-daemon-control-poc ./cmd/daemon-control-poc
           uid=$(id -u)
+          socket=/private/var/db/amneziawg-daemon-control-poc/control.sock
+          verify_absent() {
+            local failed=0 target_interface endpoint_destination
+            for path in \
+              /Library/LaunchDaemons/com.amneziawg.daemon-control.poc.plist \
+              /usr/local/libexec/amneziawg-daemon-control-poc \
+              /usr/local/libexec/amneziawg-go-daemon-control-poc \
+              /private/var/db/amneziawg-daemon-control-poc \
+              "$socket"; do
+              if [[ -e "$path" ]]; then
+                echo "cleanup left $path" >&2
+                failed=1
+              fi
+            done
+            if sudo launchctl print system/com.amneziawg.daemon-control-poc >/dev/null 2>&1; then
+              echo "cleanup left the LaunchDaemon loaded" >&2
+              failed=1
+            fi
+            if ! target_interface=$(route -n get 198.51.100.20 | awk '/interface:/{print $2; exit}'); then
+              echo "cleanup could not inspect TEST-NET split route" >&2
+              failed=1
+            fi
+            if ! endpoint_destination=$(route -n get 198.51.100.10 | awk '/destination:/{print $2; exit}'); then
+              echo "cleanup could not inspect TEST-NET endpoint route" >&2
+              failed=1
+            fi
+            case "$target_interface" in utun[0-9]*) echo "cleanup left TEST-NET split route on $target_interface" >&2; failed=1 ;; esac
+            if [[ $endpoint_destination == 198.51.100.10 ]]; then
+              echo "cleanup left TEST-NET endpoint host route" >&2
+              failed=1
+            fi
+            return "$failed"
+          }
           cleanup() {
-            sudo "$GITHUB_WORKSPACE/scripts/install-daemon-control-poc.sh" uninstall --uid "$uid" || true
+            local original_status=$? cleanup_failed=0
+            trap - EXIT
+            set +e
+            if [[ -S "$socket" ]]; then
+              sudo -u "#$uid" "$GITHUB_WORKSPACE/out/amneziawg-daemon-control-poc" \
+                -manual-route-plan-stop -socket "$socket"
+              if [[ $? -ne 0 ]]; then
+                echo "cleanup could not stop the synthetic route-plan session" >&2
+              fi
+            fi
+            if [[ -e /Library/LaunchDaemons/com.amneziawg.daemon-control.poc.plist || -e "$socket" ]]; then
+              sudo "$GITHUB_WORKSPACE/scripts/install-daemon-control-poc.sh" uninstall --uid "$uid"
+              if [[ $? -ne 0 ]]; then
+                echo "cleanup could not uninstall the synthetic daemon" >&2
+                cleanup_failed=1
+              fi
+            fi
+            if ! verify_absent; then
+              cleanup_failed=1
+            fi
+            if [[ $cleanup_failed -ne 0 ]]; then
+              if [[ $original_status -eq 0 ]]; then
+                exit 1
+              fi
+              exit "$original_status"
+            fi
+            exit "$original_status"
           }
           trap cleanup EXIT
           sudo "$GITHUB_WORKSPACE/scripts/install-daemon-control-poc.sh" install \
             --daemon "$GITHUB_WORKSPACE/out/amneziawg-daemon-control-poc" \
             --amneziawg-go "$GITHUB_WORKSPACE/out/amneziawg-go" \
-            --uid "$uid"
-          sudo "$GITHUB_WORKSPACE/scripts/install-daemon-control-poc.sh" status --uid "$uid"
+            --uid "$uid" \
+            --allow-route-plan-runtime
+          sudo -u "#$uid" "$GITHUB_WORKSPACE/out/amneziawg-daemon-control-poc" \
+            -manual-route-plan-start -socket "$socket"
+          target_interface=$(route -n get 198.51.100.20 | awk '/interface:/{print $2; exit}')
+          endpoint_interface=$(route -n get 198.51.100.10 | awk '/interface:/{print $2; exit}')
+          case "$target_interface" in utun[0-9]*) ;; *) exit 1 ;; esac
+          case "$endpoint_interface" in ""|utun[0-9]*) exit 1 ;; esac
+          sudo -u "#$uid" "$GITHUB_WORKSPACE/out/amneziawg-daemon-control-poc" \
+            -manual-route-plan-stop -socket "$socket"
           sudo "$GITHUB_WORKSPACE/scripts/install-daemon-control-poc.sh" uninstall --uid "$uid"
           trap - EXIT
-          test ! -e /Library/LaunchDaemons/com.amneziawg.daemon-control.poc.plist
-          test ! -e /usr/local/libexec/amneziawg-daemon-control-poc
-          test ! -e /usr/local/libexec/amneziawg-go-daemon-control-poc
-          test ! -e /private/var/db/amneziawg-daemon-control-poc
+          verify_absent
