@@ -173,6 +173,9 @@ func (server *Server) apply(request request) response {
 		if err := validRoutePlanMatchesConfig(request.RoutePlan, request.Config); err != nil {
 			return response{Error: "invalid_request"}
 		}
+		if request.RoutePlan == nil && hasDefaultAllowedIP(request.Config) {
+			return response{Error: "invalid_request"}
+		}
 		var reservation routePlanReservation
 		if request.RoutePlan != nil {
 			var err error
@@ -526,6 +529,22 @@ func validConfig(config string) error {
 		}
 	}
 	return nil
+}
+
+// hasDefaultAllowedIP keeps legacy, route-free starts from creating a backend
+// session for a full-tunnel UAPI configuration. The daemon has no trusted
+// physical-bypass policy on that path.
+func hasDefaultAllowedIP(config string) bool {
+	for _, line := range strings.Split(config, "\n") {
+		key, value, _ := strings.Cut(line, "=")
+		if key != "allowed_ip" {
+			continue
+		}
+		if prefix, err := netip.ParsePrefix(value); err == nil && prefix.Bits() == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func validUUID(value string) bool {

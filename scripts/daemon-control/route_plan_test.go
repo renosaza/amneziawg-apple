@@ -255,6 +255,26 @@ func TestFullAndExcludedRoutePlansDoNotReachBackend(t *testing.T) {
 	}
 }
 
+func TestLegacyDefaultAllowedIPDoesNotReachBackend(t *testing.T) {
+	backend := &fakeBackend{}
+	server, err := NewServerWithBackend(501, backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, allowedIP := range []string{"0.0.0.0/0", "::/0"} {
+		response := exchange(t, server, 501, requestFrame(t, fmt.Sprintf(
+			`{"version":1,"operation":"start","profile_id":"aaaaaaaa-2222-4333-8444-%012x","config":%q}`,
+			index+1, "private_key=synthetic\npublic_key=peer\nallowed_ip="+allowedIP,
+		)))
+		if response.OK || response.Error != "invalid_request" {
+			t.Fatalf("%s: %#v", allowedIP, response)
+		}
+	}
+	if starts, _ := backend.counts(); starts != 0 {
+		t.Fatalf("legacy default route reached backend: starts=%d", starts)
+	}
+}
+
 func TestRoutePlanIsStartOnly(t *testing.T) {
 	if _, err := decodeRequest([]byte(`{"version":1,"operation":"status","profile_id":"` + profileID + `","route_plan":{"routes":[]}}`)); err == nil {
 		t.Fatal("accepted route plan outside start")
