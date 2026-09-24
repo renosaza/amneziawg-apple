@@ -258,6 +258,9 @@ func TestFullRoutePlanReachesOnlyRoutePlanBackend(t *testing.T) {
 
 func TestFullRoutePlanRequiresCanonicalComplement(t *testing.T) {
 	config := "private_key=synthetic\npublic_key=peer\nallowed_ip=0.0.0.0/0\nendpoint=192.0.2.10:51820"
+	if err := validRoutePlanMatchesConfig([]byte(fullPlanJSON(t, nil)), config); err != nil {
+		t.Fatalf("endpoint-only full plan: %v", err)
+	}
 	valid := fullPlanJSON(t, []string{"192.0.2.0/31"})
 	if err := validRoutePlanMatchesConfig([]byte(valid), config); err != nil {
 		t.Fatalf("valid full plan: %v", err)
@@ -326,6 +329,37 @@ func TestFullRouteRejectsUnexcludedActivePeerEndpointInBothOrders(t *testing.T) 
 	}
 }
 
+func TestFullRouteAllowsExcludedSplitEndpointInBothOrders(t *testing.T) {
+	fullConfig := "private_key=synthetic\npublic_key=sticky\nallowed_ip=0.0.0.0/0\nendpoint=192.0.2.10:51820"
+	splitConfig := "private_key=synthetic\npublic_key=corporate\nallowed_ip=10.25.0.0/24\nendpoint=198.51.100.10:51820"
+	splitPlan := `{"local_address":"10.25.0.2/32","routes":[{"destination":"10.25.0.0/24","owner":"tunnel"},{"destination":"198.51.100.10/32","owner":"physicalEndpoint"}]}`
+	start := func(server *Server, id, config, plan string) response {
+		return exchange(t, server, 501, requestFrame(t, fmt.Sprintf(`{"version":1,"operation":"start","profile_id":"%s","config":%q,"route_plan":%s}`, id, config, plan)))
+	}
+	for _, firstFull := range []bool{true, false} {
+		server, err := NewServerWithBackend(501, &plannedFakeBackend{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		fullPlan := strings.Replace(fullPlanJSON(t, []string{"10.25.0.0/24", "198.51.100.10/32"}), "10.25.0.2/32", "10.100.0.2/32", 1)
+		if firstFull {
+			if response := start(server, profileID, fullConfig, fullPlan); !response.OK {
+				t.Fatalf("full first: %#v", response)
+			}
+			if response := start(server, profileIDTwo, splitConfig, splitPlan); !response.OK {
+				t.Fatalf("split after full: %#v", response)
+			}
+		} else {
+			if response := start(server, profileIDTwo, splitConfig, splitPlan); !response.OK {
+				t.Fatalf("split first: %#v", response)
+			}
+			if response := start(server, profileID, fullConfig, fullPlan); !response.OK {
+				t.Fatalf("full after split: %#v", response)
+			}
+		}
+	}
+}
+
 func TestIPv4ComplementPreservesExclusions(t *testing.T) {
 	excluded := []netip.Prefix{netip.MustParsePrefix("192.0.2.0/31"), netip.MustParsePrefix("198.51.100.10/32")}
 	routes := ipv4TunnelComplement(excluded)
@@ -384,8 +418,11 @@ func fullPlanJSON(t *testing.T, excluded []string) string {
 	for _, value := range excluded {
 		prefixes = append(prefixes, netip.MustParsePrefix(value))
 	}
-	routes := make([]routePlanRoute, 0, len(prefixes)+len(ipv4TunnelComplement(prefixes))+1)
-	for _, prefix := range ipv4TunnelComplement(prefixes) {
+	// The endpoint is a physical route and must also be absent from all full
+	// tunnel pieces. Keep this as the sole protocol encoding.
+	complement := append(append([]netip.Prefix(nil), prefixes...), netip.MustParsePrefix("192.0.2.10/32"))
+	routes := make([]routePlanRoute, 0, len(prefixes)+len(ipv4TunnelComplement(complement))+1)
+	for _, prefix := range ipv4TunnelComplement(complement) {
 		routes = append(routes, routePlanRoute{Destination: prefix.String(), Owner: "tunnel"})
 	}
 	for _, prefix := range prefixes {

@@ -9,6 +9,16 @@ enum DaemonControlProfileState: String, Equatable {
     case degraded
 }
 
+struct DaemonControlCapabilities: Equatable {
+    static let ipv4FullRoute = "ipv4-full-route"
+
+    let values: Set<String>
+
+    var supportsIPv4FullRoute: Bool {
+        values.contains(Self.ipv4FullRoute)
+    }
+}
+
 struct DaemonControlProfileStatus: Equatable {
     let id: UUID
     let state: DaemonControlProfileState
@@ -49,6 +59,10 @@ final class DaemonControlClient {
         return try DaemonControlProtocol.decodeStatusResponse(request(operation: "status", profileID: profileID), expectedProfileID: profileID)
     }
 
+    func capabilities() throws -> DaemonControlCapabilities {
+        try DaemonControlProtocol.decodeHelloResponse(request(operation: "hello", profileID: nil))
+    }
+
     func start<RoutePlan: Encodable>(
         profileID: UUID,
         uapiConfiguration: String,
@@ -71,7 +85,7 @@ final class DaemonControlClient {
     }
 
     private func verifyCompatibility() throws {
-        try DaemonControlProtocol.decodeHelloResponse(request(operation: "hello", profileID: nil))
+        _ = try capabilities()
     }
 
     private func request(operation: String, profileID: UUID?, uapiConfiguration: String? = nil) throws -> Data {
@@ -147,6 +161,7 @@ enum DaemonControlProtocol {
         let ok: Bool
         let error: String?
         let protocolVersion: Int?
+        let capabilities: [String]?
         let profile: Profile?
         let profiles: [Profile]?
 
@@ -154,6 +169,7 @@ enum DaemonControlProtocol {
             case ok
             case error
             case protocolVersion = "protocol_version"
+            case capabilities
             case profile
             case profiles
         }
@@ -235,7 +251,7 @@ enum DaemonControlProtocol {
         return statuses
     }
 
-    static func decodeHelloResponse(_ data: Data) throws {
+    static func decodeHelloResponse(_ data: Data) throws -> DaemonControlCapabilities {
         guard let response = try? decodeResponse(data),
               response.ok,
               response.error == nil,
@@ -245,6 +261,18 @@ enum DaemonControlProtocol {
         else {
             throw DaemonControlClientError.incompatibleDaemon
         }
+        let capabilities = response.capabilities ?? []
+        guard capabilities.count <= 8,
+              Set(capabilities).count == capabilities.count,
+              capabilities.allSatisfy({ capability in
+                  !capability.isEmpty && capability.allSatisfy {
+                      $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-")
+                  }
+              })
+        else {
+            throw DaemonControlClientError.incompatibleDaemon
+        }
+        return DaemonControlCapabilities(values: Set(capabilities))
     }
 
     static func decodeStatusResponse(_ data: Data, expectedProfileID: UUID) throws -> DaemonControlProfileStatus {

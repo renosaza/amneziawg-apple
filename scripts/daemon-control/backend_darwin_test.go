@@ -6,6 +6,7 @@ package daemoncontrol
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -19,14 +20,29 @@ func TestManualRoutePlanAcceptsRouteOrder(t *testing.T) {
 
 func TestFullRouteRuntimeIsDisabledWithoutSeparateFlag(t *testing.T) {
 	backend := &tunnelBackend{allowRoutePlanRuntime: true}
-	plan := routePlan{LocalAddress: "10.25.0.2/32", Routes: json.RawMessage(`[
-        {"destination":"0.0.0.0/1","owner":"tunnel"},
-        {"destination":"128.0.0.0/1","owner":"tunnel"},
-        {"destination":"192.0.2.0/31","owner":"excluded"},
-        {"destination":"192.0.2.10/32","owner":"physicalEndpoint"}
-    ]`)}
+	var plan routePlan
+	if err := json.Unmarshal([]byte(fullPlanJSON(t, []string{"192.0.2.0/31"})), &plan); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := backend.StartWithRoutePlan("", plan); err == nil || !strings.Contains(err.Error(), "full route runtime unavailable") {
 		t.Fatalf("full route ran without explicit flag: %v", err)
+	}
+}
+
+func TestFullRouteCapabilityNeedsBothRootFlags(t *testing.T) {
+	for _, test := range []struct {
+		routes, full bool
+		want         []string
+	}{
+		{false, false, nil},
+		{true, false, nil},
+		{false, true, nil},
+		{true, true, []string{"ipv4-full-route"}},
+	} {
+		backend := &tunnelBackend{allowRoutePlanRuntime: test.routes, allowFullRouteRuntime: test.full}
+		if got := backend.capabilities(); !reflect.DeepEqual(got, test.want) {
+			t.Fatalf("route=%t full=%t capabilities=%#v", test.routes, test.full, got)
+		}
 	}
 }
 

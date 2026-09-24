@@ -79,17 +79,23 @@ struct DaemonControlClientSelfTest {
         try expect(request["profile_id"] == nil)
         try expect(request["config"] == nil)
 
-        try DaemonControlProtocol.decodeHelloResponse(
+        let noCapabilities = try DaemonControlProtocol.decodeHelloResponse(
             Data("{\"ok\":true,\"protocol_version\":1}".utf8)
         )
+        try expect(!noCapabilities.supportsIPv4FullRoute)
+        let fullRoute = try DaemonControlProtocol.decodeHelloResponse(
+            Data("{\"ok\":true,\"protocol_version\":1,\"capabilities\":[\"ipv4-full-route\",\"future-capability\"]}".utf8)
+        )
+        try expect(fullRoute.supportsIPv4FullRoute)
         for response in [
             "{\"ok\":true}",
             "{\"ok\":true,\"protocol_version\":2}",
+            "{\"ok\":true,\"protocol_version\":1,\"capabilities\":[\"ipv4-full-route\",\"ipv4-full-route\"]}",
             "{\"ok\":false,\"error\":\"invalid_request\"}",
             "{\"ok\":true,\"protocol_version\":1,\"profiles\":[]}" // Hello must not carry state.
         ] {
             try expectIncompatibleDaemon {
-                try DaemonControlProtocol.decodeHelloResponse(Data(response.utf8))
+                _ = try DaemonControlProtocol.decodeHelloResponse(Data(response.utf8))
             }
         }
     }
