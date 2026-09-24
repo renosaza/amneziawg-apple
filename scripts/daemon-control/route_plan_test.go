@@ -95,6 +95,7 @@ func TestRoutePlanReservationsAllowDistinctSplits(t *testing.T) {
 	}{
 		{profileID, "private_key=synthetic\npublic_key=peer-one\nallowed_ip=10.25.0.0/24\nendpoint=192.0.2.10:51820", `{"local_address":"10.25.0.2/32","routes":[{"destination":"10.25.0.0/24","owner":"tunnel"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"}]}`},
 		{profileIDTwo, "private_key=synthetic\npublic_key=peer-two\nallowed_ip=10.1.1.2/32\nendpoint=198.51.100.10:51820", `{"local_address":"10.1.1.1/32","routes":[{"destination":"10.1.1.2/32","owner":"tunnel"},{"destination":"198.51.100.10/32","owner":"physicalEndpoint"}]}`},
+		{profileIDThree, "private_key=synthetic\npublic_key=peer-three\nallowed_ip=10.2.2.2/32\nendpoint=203.0.113.10:51820", `{"local_address":"10.2.2.1/32","routes":[{"destination":"10.2.2.2/32","owner":"tunnel"},{"destination":"203.0.113.10/32","owner":"physicalEndpoint"}]}`},
 	}
 	for _, profile := range profiles {
 		response := exchange(t, server, 501, requestFrame(t, fmt.Sprintf(
@@ -108,11 +109,13 @@ func TestRoutePlanReservationsAllowDistinctSplits(t *testing.T) {
 	if starts, _ := backend.counts(); starts != len(profiles) || len(server.planned) != len(profiles) {
 		t.Fatalf("starts=%d planned=%d", starts, len(server.planned))
 	}
-	if stopped := server.apply(request{Operation: "stop", ProfileID: profileID}); !stopped.OK || len(server.planned) != 1 {
+	if stopped := server.apply(request{Operation: "stop", ProfileID: profileID}); !stopped.OK || len(server.planned) != len(profiles)-1 {
 		t.Fatalf("stop first profile: %#v planned=%d", stopped, len(server.planned))
 	}
-	if status := server.apply(request{Operation: "status", ProfileID: profileIDTwo}); !status.OK {
-		t.Fatalf("remaining profile changed: %#v", status)
+	for _, id := range []string{profileIDTwo, profileIDThree} {
+		if status := server.apply(request{Operation: "status", ProfileID: id}); !status.OK {
+			t.Fatalf("remaining profile %s changed: %#v", id, status)
+		}
 	}
 }
 
