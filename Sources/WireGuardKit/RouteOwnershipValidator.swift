@@ -24,6 +24,11 @@ public enum MacOSDaemonRoutePlanError: Error, Equatable {
     case invalidInterfaceAddress
 }
 
+public enum MacOSDaemonSingleSplitProfileError: Error, Equatable {
+    case unsupportedConfiguration
+    case routePlan(MacOSDaemonRoutePlanError)
+}
+
 public struct MacOSDaemonRoutePlan: Codable, Equatable {
     public enum Owner: String, Codable, Hashable {
         case tunnel
@@ -46,6 +51,40 @@ public struct MacOSDaemonRoutePlan: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case localAddress = "local_address"
         case routes
+    }
+
+    public static func buildSingleIPv4Split(
+        activating name: String,
+        configuration: TunnelConfiguration,
+        activeTunnels: [(name: String, configuration: TunnelConfiguration)] = []
+    ) -> Result<MacOSDaemonRoutePlan, MacOSDaemonSingleSplitProfileError> {
+        guard configuration.interface.addresses.count == 1,
+              configuration.interface.addresses[0].address is IPv4Address,
+              configuration.interface.dns.isEmpty,
+              configuration.interface.dnsSearch.isEmpty,
+              configuration.peers.count == 1
+        else {
+            return .failure(.unsupportedConfiguration)
+        }
+        let peer = configuration.peers[0]
+        guard peer.excludeIPs.isEmpty,
+              peer.allowedIPs.count == 1,
+              let allowedIP = peer.allowedIPs.first,
+              let routeAddress = allowedIP.address as? IPv4Address,
+              isUsableIPv4Address(routeAddress),
+              (2 ... 32).contains(allowedIP.networkPrefixLength),
+              let endpoint = peer.endpoint,
+              case .ipv4(let endpointAddress) = endpoint.host,
+              isUsableIPv4Address(endpointAddress)
+        else {
+            return .failure(.unsupportedConfiguration)
+        }
+        return build(
+            activating: name,
+            configuration: configuration,
+            resolvedEndpoints: [endpoint],
+            activeTunnels: activeTunnels
+        ).mapError(MacOSDaemonSingleSplitProfileError.routePlan)
     }
 
     public static func build(
@@ -96,6 +135,10 @@ public struct MacOSDaemonRoutePlan: Codable, Equatable {
     }
 
     private static func isUsableLocalIPv4Address(_ address: IPv4Address) -> Bool {
+        isUsableIPv4Address(address)
+    }
+
+    private static func isUsableIPv4Address(_ address: IPv4Address) -> Bool {
         let bytes = address.rawValue
         return bytes[0] != 0 && bytes[0] < 224 && bytes[0] != 127 &&
             !(bytes[0] == 169 && bytes[1] == 254)

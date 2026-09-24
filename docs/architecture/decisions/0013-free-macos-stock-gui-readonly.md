@@ -36,9 +36,10 @@ cannot send a provider message. Add/import and edit-save/rename validate and
 persist through `DaemonProfileStore`; an existing record keeps its UUID. The
 in-memory list changes only after the store operation succeeds. Delete is
 allowed only for an inactive record so an active or degraded daemon session
-cannot lose its profile. On-demand, start, and stop requests fail before a
-Network Extension or daemon lifecycle operation. The target does not send
-configuration text to the daemon or change routes, addresses, DNS, or PF.
+cannot lose its profile. On-demand fails before a Network Extension or daemon
+lifecycle operation. Decision 0017 adds the later, constrained start/stop
+exception; this target otherwise does not send configuration text to the
+daemon or change routes, addresses, DNS, or PF.
 
 ## Consequences
 
