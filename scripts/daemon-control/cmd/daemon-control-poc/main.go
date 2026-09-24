@@ -22,7 +22,7 @@ import (
 	"github.com/renosaza/amneziawg-daemon-control-poc"
 )
 
-const maxFrameBytes = 4 * 1024
+const maxFrameBytes = 16 * 1024
 
 const manualRoutePlanProfileID = "11111111-2222-4333-8444-555555555555"
 const manualRoutePlanProfileIDTwo = "22222222-3333-4444-8555-666666666666"
@@ -295,14 +295,14 @@ func manualFullRoutePlan() json.RawMessage {
 }
 
 func manualIPv4TunnelComplement(excluded []netip.Prefix) []netip.Prefix {
-	routes := []netip.Prefix{
-		netip.MustParsePrefix("1.0.0.0/8"), netip.MustParsePrefix("2.0.0.0/7"),
-		netip.MustParsePrefix("4.0.0.0/6"), netip.MustParsePrefix("8.0.0.0/5"),
-		netip.MustParsePrefix("16.0.0.0/4"), netip.MustParsePrefix("32.0.0.0/3"),
-		netip.MustParsePrefix("64.0.0.0/2"), netip.MustParsePrefix("128.0.0.0/2"),
-		netip.MustParsePrefix("192.0.0.0/3"),
-	}
-	for _, exclusion := range excluded {
+	routes := []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}
+	reserved := append([]netip.Prefix{
+		netip.MustParsePrefix("0.0.0.0/8"),
+		netip.MustParsePrefix("127.0.0.0/8"),
+		netip.MustParsePrefix("169.254.0.0/16"),
+		netip.MustParsePrefix("224.0.0.0/3"),
+	}, excluded...)
+	for _, exclusion := range reserved {
 		next := make([]netip.Prefix, 0, len(routes))
 		for _, route := range routes {
 			next = append(next, manualSubtractIPv4Prefix(route, exclusion)...)
@@ -331,8 +331,9 @@ func manualSubtractIPv4Prefix(route, exclusion netip.Prefix) []netip.Prefix {
 }
 
 type listResponse struct {
-	OK              bool `json:"ok"`
-	ProtocolVersion int  `json:"protocol_version,omitempty"`
+	OK              bool   `json:"ok"`
+	Error           string `json:"error,omitempty"`
+	ProtocolVersion int    `json:"protocol_version,omitempty"`
 	Profile         *struct {
 		ID     string `json:"id"`
 		Status string `json:"status"`
@@ -399,7 +400,10 @@ func daemonManualRoutePlanStartRequest(socket string, request struct {
 		return err
 	}
 	response, err := daemonExchange(socket, request)
-	if err != nil || response.Profile == nil || response.Profile.ID != request.ProfileID || response.Profile.Status != "running" {
+	if err != nil {
+		return err
+	}
+	if response.Profile == nil || response.Profile.ID != request.ProfileID || response.Profile.Status != "running" {
 		return errors.New("daemon synthetic route-plan start failed")
 	}
 	return nil
@@ -414,7 +418,10 @@ func daemonManualRoutePlanStopRequest(socket, profileID string) error {
 		Operation string `json:"operation"`
 		ProfileID string `json:"profile_id"`
 	}{Version: 1, Operation: "stop", ProfileID: profileID})
-	if err != nil || response.Profile == nil || response.Profile.ID != profileID || response.Profile.Status != "stopped" {
+	if err != nil {
+		return err
+	}
+	if response.Profile == nil || response.Profile.ID != profileID || response.Profile.Status != "stopped" {
 		return errors.New("daemon synthetic route-plan stop failed")
 	}
 	return nil
@@ -472,8 +479,16 @@ func daemonExchange(socket string, request any) (listResponse, error) {
 		return listResponse{}, errors.New("daemon control response failed")
 	}
 	var response listResponse
-	if err := json.Unmarshal(responseFrame, &response); err != nil || !response.OK {
+	if err := json.Unmarshal(responseFrame, &response); err != nil {
 		return listResponse{}, errors.New("daemon control rejected control operation")
+	}
+	if !response.OK {
+		switch response.Error {
+		case "invalid_request", "start_failed", "stop_failed":
+			return listResponse{}, fmt.Errorf("daemon control rejected %s", response.Error)
+		default:
+			return listResponse{}, errors.New("daemon control rejected control operation")
+		}
 	}
 	return response, nil
 }
