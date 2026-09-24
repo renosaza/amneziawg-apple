@@ -65,6 +65,7 @@ func (logger *diagnostics) Event(event DiagnosticEvent) {
 	event.RouteOwner = safeDiagnosticToken(event.RouteOwner)
 	event.Interface = safeDiagnosticInterface(event.Interface)
 	event.Prefix = safeDiagnosticPrefix(event.Prefix)
+	event.Code = safeDiagnosticToken(event.Code)
 	event.Result = safeDiagnosticToken(event.Result)
 	if logger.includeEndpoints {
 		event.Endpoint = safeDiagnosticEndpoint(event.Endpoint)
@@ -93,6 +94,27 @@ func diagnosticErrorCode(err error) string {
 		return "operation_failed"
 	default:
 		return ""
+	}
+}
+
+// physicalEndpointDiagnosticCode keeps route-operation errno details useful
+// without emitting a kernel or protocol error string.
+func physicalEndpointDiagnosticCode(err error) string {
+	switch {
+	case errors.Is(err, syscall.EEXIST):
+		return "eexist"
+	case errors.Is(err, syscall.EINVAL):
+		return "einval"
+	case errors.Is(err, syscall.ENETUNREACH):
+		return "enetunreach"
+	case errors.Is(err, syscall.EADDRNOTAVAIL):
+		return "eaddrnotavail"
+	case errors.Is(err, syscall.EACCES), errors.Is(err, syscall.EPERM):
+		return "permission_denied"
+	case errors.Is(err, syscall.ENODEV):
+		return "enodev"
+	default:
+		return "unknown"
 	}
 }
 

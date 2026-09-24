@@ -160,6 +160,18 @@ func (backend *tunnelBackend) routeEvent(process *tunnelProcess, stage, owner, r
 	backend.event(event)
 }
 
+func (backend *tunnelBackend) physicalEndpointFailureEvent(process *tunnelProcess, err error) {
+	stage, code, ok := physicalEndpointRouteDiagnostic(err)
+	if !ok {
+		return
+	}
+	event := DiagnosticEvent{Event: "route", Stage: stage, Class: "physical_endpoint_route_failure", Code: code, RouteOwner: "physical_endpoint", Result: "failed"}
+	if process != nil {
+		event.Session = process.name
+	}
+	backend.event(event)
+}
+
 func (backend *tunnelBackend) splitRouteEvent(process *tunnelProcess, route *SyntheticFallbackRoute, result string) {
 	event := DiagnosticEvent{Event: "route", Stage: "split_route", RouteOwner: "tunnel", Result: result}
 	if process != nil {
@@ -241,6 +253,8 @@ func (backend *tunnelBackend) start(config string, plan *routePlan) (Session, er
 				process.precedenceEndpointRoute, err = configurePlannedPhysicalEndpointRoute(endpoint)
 				if err == nil {
 					backend.routeEvent(process, "physical_endpoint", "physical_endpoint", "selected", process.precedenceEndpointRoute)
+				} else {
+					backend.physicalEndpointFailureEvent(process, err)
 				}
 			}
 			if err == nil {
