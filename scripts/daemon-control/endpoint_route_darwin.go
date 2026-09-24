@@ -6,6 +6,7 @@ package daemoncontrol
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"os"
@@ -36,18 +37,18 @@ func configurePlannedPhysicalEndpointRoute(target netip.Addr) (*PhysicalEndpoint
 	configured := &PhysicalEndpointRoute{target: target}
 	existing, err := configured.lookup()
 	if err != nil || existing.Err != nil || configured.isTargetHostRoute(existing) {
-		return nil, errors.Join(err, existing.Err)
+		return nil, fmt.Errorf("planned endpoint preflight: %w", errors.Join(err, existing.Err))
 	}
 	configured.basePrefix, _ = routePrefix(existing)
 	configured.gateway, configured.iface, err = physicalGateway(existing)
 	if err != nil || !configured.basePrefix.IsValid() {
-		return nil, errors.Join(err, errors.New("effective endpoint route unavailable"))
+		return nil, fmt.Errorf("planned endpoint preflight: %w", errors.Join(err, errors.New("effective endpoint route unavailable")))
 	}
 	if err := configured.add(); err != nil {
-		return configured.cleanupFailedRouteAdd(err)
+		return configured.cleanupFailedRouteAdd(fmt.Errorf("planned endpoint add: %w", err))
 	}
 	if err := configured.verify(); err != nil || !configured.baseRouteInRIB() {
-		return configured.cleanupFailedRouteAdd(errors.Join(err, errors.New("effective endpoint route changed")))
+		return configured.cleanupFailedRouteAdd(fmt.Errorf("planned endpoint verify-base-rib: %w", errors.Join(err, errors.New("effective endpoint route changed"))))
 	}
 	return configured, nil
 }

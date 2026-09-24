@@ -172,6 +172,9 @@ func (backend *tunnelBackend) start(config string, plan *routePlan) (Session, er
 			if err == nil {
 				backend.lastStartStage = "physical-endpoint"
 				process.precedenceEndpointRoute, err = configurePlannedPhysicalEndpointRoute(endpoint)
+				if err != nil {
+					backend.lastStartStage = strings.Split(err.Error(), ":")[0]
+				}
 			}
 			if err == nil {
 				backend.lastStartStage = "split-route"
