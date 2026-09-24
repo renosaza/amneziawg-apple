@@ -155,6 +155,9 @@ func (server *Server) apply(request request) response {
 		if len(server.profiles) == maxProfiles {
 			return response{Error: "capacity"}
 		}
+		if err := validRoutePlanMatchesConfig(request.RoutePlan, request.Config); err != nil {
+			return response{Error: "invalid_request"}
+		}
 		session, err := server.backend.Start(request.Config)
 		if err != nil {
 			if session.value != nil {
@@ -301,6 +304,83 @@ func validRoutePlan(raw json.RawMessage) error {
 		seen[prefix] = struct{}{}
 	}
 	return nil
+}
+
+// validRoutePlanMatchesConfig only binds a route plan to the UAPI fields it
+// describes. It deliberately does not reconstruct route ownership or apply
+// native routes.
+func validRoutePlanMatchesConfig(raw json.RawMessage, config string) error {
+	if raw == nil {
+		return nil
+	}
+	if err := validConfig(config); err != nil {
+		return err
+	}
+	if err := validRoutePlan(raw); err != nil {
+		return err
+	}
+	var plan routePlan
+	if err := json.Unmarshal(raw, &plan); err != nil {
+		return errors.New("invalid route plan")
+	}
+	var routes []routePlanRoute
+	if err := json.Unmarshal(plan.Routes, &routes); err != nil {
+		return errors.New("invalid route plan")
+	}
+
+	hasPhysicalEndpoint := false
+	for _, route := range routes {
+		hasPhysicalEndpoint = hasPhysicalEndpoint || route.Owner == "physicalEndpoint"
+	}
+	allowedIPs := make([]netip.Prefix, 0)
+	endpoints := make(map[netip.Addr]struct{})
+	for _, line := range strings.Split(config, "\n") {
+		key, value, _ := strings.Cut(line, "=")
+		switch key {
+		case "allowed_ip":
+			prefix, err := netip.ParsePrefix(value)
+			if err != nil {
+				return errors.New("invalid route plan")
+			}
+			allowedIPs = append(allowedIPs, prefix.Masked())
+		case "endpoint":
+			endpoint, err := netip.ParseAddrPort(value)
+			if err != nil {
+				if hasPhysicalEndpoint {
+					return errors.New("invalid route plan")
+				}
+				continue
+			}
+			endpoints[endpoint.Addr()] = struct{}{}
+		}
+	}
+
+	for _, route := range routes {
+		prefix, err := netip.ParsePrefix(route.Destination)
+		if err != nil {
+			return errors.New("invalid route plan")
+		}
+		switch route.Owner {
+		case "tunnel":
+			if !containsPrefix(allowedIPs, prefix) {
+				return errors.New("invalid route plan")
+			}
+		case "physicalEndpoint":
+			if _, found := endpoints[prefix.Addr()]; !found {
+				return errors.New("invalid route plan")
+			}
+		}
+	}
+	return nil
+}
+
+func containsPrefix(prefixes []netip.Prefix, candidate netip.Prefix) bool {
+	for _, prefix := range prefixes {
+		if prefix.Bits() <= candidate.Bits() && prefix.Contains(candidate.Addr()) {
+			return true
+		}
+	}
+	return false
 }
 
 func validConfig(config string) error {
