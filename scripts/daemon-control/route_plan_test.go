@@ -218,6 +218,36 @@ func TestRoutePlanBoundaryRejectsUnsupportedInput(t *testing.T) {
 	}
 }
 
+func TestFullAndExcludedRoutePlansDoNotReachBackend(t *testing.T) {
+	backend := &fakeBackend{}
+	server, err := NewServerWithBackend(501, backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requests := []struct{ config, plan string }{
+		{
+			config: "private_key=synthetic\npublic_key=peer\nallowed_ip=0.0.0.0/0\nendpoint=192.0.2.10:51820",
+			plan:   `{"local_address":"10.25.0.2/32","routes":[{"destination":"0.0.0.0/0","owner":"tunnel"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"}]}`,
+		},
+		{
+			config: "private_key=synthetic\npublic_key=peer\nallowed_ip=10.25.0.0/24\nendpoint=192.0.2.10:51820",
+			plan:   `{"local_address":"10.25.0.2/32","routes":[{"destination":"10.25.0.0/24","owner":"tunnel"},{"destination":"192.168.31.0/24","owner":"physicalExcluded"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"}]}`,
+		},
+	}
+	for index, candidate := range requests {
+		response := exchange(t, server, 501, requestFrame(t, fmt.Sprintf(
+			`{"version":1,"operation":"start","profile_id":"aaaaaaaa-2222-4333-8444-%012x","config":%q,"route_plan":%s}`,
+			index+1, candidate.config, candidate.plan,
+		)))
+		if response.OK || response.Error != "invalid_request" {
+			t.Fatalf("candidate %d: %#v", index, response)
+		}
+	}
+	if starts, _ := backend.counts(); starts != 0 {
+		t.Fatalf("unsupported plans reached backend: starts=%d", starts)
+	}
+}
+
 func TestRoutePlanIsStartOnly(t *testing.T) {
 	if _, err := decodeRequest([]byte(`{"version":1,"operation":"status","profile_id":"` + profileID + `","route_plan":{"routes":[]}}`)); err == nil {
 		t.Fatal("accepted route plan outside start")

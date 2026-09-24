@@ -389,22 +389,29 @@ func validRoutePlan(raw json.RawMessage) error {
 	if len(routes) > maxRoutePlanRoutes {
 		return errors.New("invalid route plan")
 	}
-	seen := make(map[netip.Prefix]struct{}, len(routes))
+	seen := make(map[routePlanRoute]struct{}, len(routes))
 	for _, route := range routes {
 		prefix, err := netip.ParsePrefix(route.Destination)
-		if err != nil || !usableIPv4Address(prefix.Addr()) || prefix != prefix.Masked() || prefix.String() != route.Destination || prefix.Bits() <= 1 {
+		if err != nil || !prefix.Addr().Is4() || prefix != prefix.Masked() || prefix.String() != route.Destination {
 			return errors.New("invalid route plan")
 		}
-		if route.Owner != "tunnel" && route.Owner != "physicalEndpoint" {
+		if route.Owner != "tunnel" && route.Owner != "physicalEndpoint" && route.Owner != "physicalExcluded" {
+			return errors.New("invalid route plan")
+		}
+		isDefaultTunnel := route.Owner == "tunnel" && prefix.Bits() == 0 && prefix.Addr().IsUnspecified()
+		if !isDefaultTunnel && (!usableIPv4Address(prefix.Addr()) || prefix.Bits() <= 1) {
+			return errors.New("invalid route plan")
+		}
+		if route.Owner == "tunnel" && prefix.Bits() == 0 && !isDefaultTunnel {
 			return errors.New("invalid route plan")
 		}
 		if route.Owner == "physicalEndpoint" && prefix.Bits() != 32 {
 			return errors.New("invalid route plan")
 		}
-		if _, duplicate := seen[prefix]; duplicate {
+		if _, duplicate := seen[route]; duplicate {
 			return errors.New("invalid route plan")
 		}
-		seen[prefix] = struct{}{}
+		seen[route] = struct{}{}
 	}
 	return nil
 }
@@ -470,6 +477,7 @@ func validRoutePlanMatchesConfig(raw json.RawMessage, config string) error {
 	var tunnelRoute netip.Prefix
 	var physicalEndpoint netip.Addr
 	var tunnels, physicalEndpoints int
+	var hasPhysicalExclusions bool
 	for _, route := range routes {
 		prefix, err := netip.ParsePrefix(route.Destination)
 		if err != nil {
@@ -482,7 +490,15 @@ func validRoutePlanMatchesConfig(raw json.RawMessage, config string) error {
 		case "physicalEndpoint":
 			physicalEndpoints++
 			physicalEndpoint = prefix.Addr()
+		case "physicalExcluded":
+			hasPhysicalExclusions = true
 		}
+	}
+	// ExcludeIPs is a NetworkExtension-only field and is intentionally absent
+	// from UAPI. A root daemon cannot bind a physicalExcluded route to trusted
+	// configuration, so it must reject it before any backend side effect.
+	if hasPhysicalExclusions || allowedIP.Bits() == 0 {
+		return errors.New("unsupported route plan runtime")
 	}
 	if tunnels != 1 || physicalEndpoints != 1 || tunnelRoute != allowedIP || physicalEndpoint != endpoint {
 		return errors.New("invalid route plan")

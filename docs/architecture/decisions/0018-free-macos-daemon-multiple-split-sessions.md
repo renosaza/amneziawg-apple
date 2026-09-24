@@ -29,7 +29,12 @@ and planned sessions cannot coexist.
 
 This adds daemon-side ownership checks only. It does not add full/default
 routes, IPv6, DNS, `ExcludeIPs`, hostname resolution, or automatic gateway
-rebinding. The backend selects one physical IPv4 RIB base route at start and
+rebinding. The route-plan model can now describe `physicalExcluded` routes so
+the future full-tunnel policy has an explicit representation for LAN and
+corporate bypasses. The daemon rejects every such plan, and every IPv4 default
+route plan, before its backend starts: UAPI does not contain `ExcludeIPs`, so
+the daemon cannot bind a caller-supplied physical bypass to trusted
+configuration yet. The backend selects one physical IPv4 RIB base route at start and
 records its gateway and interface for the endpoint host route. A network
 change while a session is active is unsupported: stop it and start it again
 after the network has settled. Until a rebind design is implemented and

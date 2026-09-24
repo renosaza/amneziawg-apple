@@ -33,7 +33,27 @@ final class MacOSDaemonRoutePlanTests: XCTestCase {
 
         let plan = try result.get()
         XCTAssertTrue(plan.routes.contains(.init(destination: "192.0.2.10/32", owner: .physicalEndpoint)))
+        XCTAssertTrue(plan.routes.contains(.init(destination: "192.0.2.10/32", owner: .physicalExcluded)))
         XCTAssertFalse(plan.routes.contains(.init(destination: "192.0.2.10/32", owner: .tunnel)))
+    }
+
+    func testFullTunnelPlanCarriesEachExcludedPhysicalBypass() throws {
+        let endpoint = Endpoint(from: "77.105.177.18:22022")!
+        let plan = try MacOSDaemonRoutePlan.build(
+            activating: "sticky",
+            configuration: configuration(
+                allowed: ["0.0.0.0/0"],
+                excluded: ["192.168.31.0/24", "10.25.0.0/24", "10.1.1.2/32", "77.105.177.18/32"],
+                endpoint: endpoint),
+            resolvedEndpoints: [endpoint],
+            activeTunnels: [("CM", configuration(allowed: ["10.25.0.0/24"]))]
+        ).get()
+
+        for destination in ["192.168.31.0/24", "10.25.0.0/24", "10.1.1.2/32", "77.105.177.18/32"] {
+            XCTAssertTrue(plan.routes.contains(.init(destination: destination, owner: .physicalExcluded)))
+            XCTAssertFalse(plan.routes.contains(.init(destination: destination, owner: .tunnel)))
+        }
+        XCTAssertTrue(plan.routes.contains(.init(destination: "77.105.177.18/32", owner: .physicalEndpoint)))
     }
 
     func testActiveEndpointRequiresExclusionButIsNotAddedToCandidatePlan() {
