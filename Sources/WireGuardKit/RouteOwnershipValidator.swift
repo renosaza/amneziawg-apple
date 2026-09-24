@@ -21,6 +21,7 @@ public enum RouteOwnershipValidationError: Equatable {
 public enum MacOSDaemonRoutePlanError: Error, Equatable {
     case routeOwnership(RouteOwnershipValidationError)
     case invalidResolvedEndpoints
+    case invalidInterfaceAddress
 }
 
 public struct MacOSDaemonRoutePlan: Codable, Equatable {
@@ -39,7 +40,13 @@ public struct MacOSDaemonRoutePlan: Codable, Equatable {
         }
     }
 
+    public let localAddress: String
     public let routes: [Route]
+
+    enum CodingKeys: String, CodingKey {
+        case localAddress = "local_address"
+        case routes
+    }
 
     public static func build(
         activating name: String,
@@ -54,6 +61,9 @@ public struct MacOSDaemonRoutePlan: Codable, Equatable {
         }
         guard configuration.peers.count == resolvedEndpoints.count else {
             return .failure(.invalidResolvedEndpoints)
+        }
+        guard let localAddress = localIPv4Address(configuration.interface.addresses) else {
+            return .failure(.invalidInterfaceAddress)
         }
         var routes = RouteOwnershipValidator.effectiveRoutes(for: configuration).map {
             Route(destination: $0.stringRepresentation, owner: .tunnel)
@@ -71,11 +81,16 @@ public struct MacOSDaemonRoutePlan: Codable, Equatable {
             }
             routes.append(Route(destination: route.stringRepresentation, owner: .physicalEndpoint))
         }
-        return .success(MacOSDaemonRoutePlan(routes: Array(Set(routes)).sorted {
+        return .success(MacOSDaemonRoutePlan(localAddress: localAddress, routes: Array(Set(routes)).sorted {
             $0.destination == $1.destination ?
                 $0.owner.rawValue < $1.owner.rawValue :
                 $0.destination < $1.destination
         }))
+    }
+
+    private static func localIPv4Address(_ addresses: [IPAddressRange]) -> String? {
+        guard addresses.count == 1, addresses[0].address is IPv4Address else { return nil }
+        return IPAddressRange(address: addresses[0].address, networkPrefixLength: 32).stringRepresentation
     }
 
     private static func endpointRange(_ endpoint: Endpoint) -> IPAddressRange? {

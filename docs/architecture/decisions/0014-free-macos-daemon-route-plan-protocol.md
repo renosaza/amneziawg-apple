@@ -13,11 +13,12 @@ constraints:
 ## Decision
 
 The daemon-control `start` request may carry the JSON form of the pure
-`MacOSDaemonRoutePlan`. The IPC boundary accepts only canonical IPv4 CIDRs,
-at most 16 entries, `tunnel` and `physicalEndpoint` owners, and literal `/32`
-physical endpoints. It rejects IPv6, `/0`, `/1`, unknown JSON fields, and
-duplicate destinations. The plan is bound to the request's validated profile
-UUID and is rejected for every non-`start` operation.
+`MacOSDaemonRoutePlan`. The IPC boundary requires one canonical IPv4
+`local_address` `/32`, accepts at most 16 canonical IPv4 route CIDRs,
+`tunnel` and `physicalEndpoint` owners, and literal `/32` physical endpoints.
+It rejects IPv6, `/0`, `/1`, unknown JSON fields, and duplicate destinations.
+The plan is bound to the request's validated profile UUID and is rejected for
+every non-`start` operation.
 
 Before it starts a backend child, the daemon also checks only that every
 `tunnel` route is contained by an `allowed_ip` UAPI field and every

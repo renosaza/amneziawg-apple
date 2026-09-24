@@ -44,7 +44,8 @@ type request struct {
 // routePlan matches WireGuardKit's MacOSDaemonRoutePlan JSON shape. It is
 // validated at the IPC boundary only; the experimental daemon does not apply it.
 type routePlan struct {
-	Routes json.RawMessage `json:"routes"`
+	LocalAddress string          `json:"local_address"`
+	Routes       json.RawMessage `json:"routes"`
 }
 
 type routePlanRoute struct {
@@ -272,6 +273,11 @@ func validRoutePlan(raw json.RawMessage) error {
 		return errors.New("invalid route plan")
 	}
 	if plan.Routes == nil || bytes.Equal(plan.Routes, []byte("null")) {
+		return errors.New("invalid route plan")
+	}
+	localAddress, err := netip.ParsePrefix(plan.LocalAddress)
+	if err != nil || !localAddress.Addr().Is4() || localAddress.Bits() != 32 ||
+		localAddress != localAddress.Masked() || localAddress.String() != plan.LocalAddress {
 		return errors.New("invalid route plan")
 	}
 	decoder = json.NewDecoder(bytes.NewReader(plan.Routes))

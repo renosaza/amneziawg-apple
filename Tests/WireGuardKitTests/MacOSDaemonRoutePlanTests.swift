@@ -54,6 +54,24 @@ final class MacOSDaemonRoutePlanTests: XCTestCase {
         XCTAssertEqual(result, .failure(.invalidResolvedEndpoints))
     }
 
+    func testNormalizesSingleIPv4InterfaceAddressToHostRoute() throws {
+        let plan = try MacOSDaemonRoutePlan.build(
+            activating: "CM", configuration: configuration(allowed: ["10.25.0.0/24"], address: ["10.25.0.2/24"]),
+            resolvedEndpoints: [nil], activeTunnels: []).get()
+
+        XCTAssertEqual(plan.localAddress, "10.25.0.2/32")
+    }
+
+    func testRejectsMissingMultipleAndIPv6InterfaceAddresses() {
+        for addresses in [[], ["10.25.0.2/24", "10.25.0.3/24"], ["2001:db8::2/64"]] {
+            let result = MacOSDaemonRoutePlan.build(
+                activating: "CM", configuration: configuration(allowed: ["10.25.0.0/24"], address: addresses),
+                resolvedEndpoints: [nil], activeTunnels: [])
+
+            XCTAssertEqual(result, .failure(.invalidInterfaceAddress))
+        }
+    }
+
     func testIPv4AndIPv6RemainIndependentAndSerializationHasNoKeys() throws {
         let active = configuration(allowed: ["::/0"])
         let activating = configuration(allowed: ["0.0.0.0/0"])
@@ -63,19 +81,23 @@ final class MacOSDaemonRoutePlanTests: XCTestCase {
         XCTAssertTrue(plan.routes.contains(.init(destination: "0.0.0.0/0", owner: .tunnel)))
         XCTAssertFalse(plan.routes.contains(.init(destination: "::/0", owner: .tunnel)))
         let serialized = String(data: try JSONEncoder().encode(plan), encoding: .utf8)!
+        XCTAssertTrue(serialized.contains(#""local_address":"192.0.2.2/32""#))
         XCTAssertFalse(serialized.contains(activating.interface.privateKey.base64Key))
         XCTAssertFalse(serialized.contains(activating.peers[0].preSharedKey!.base64Key))
         XCTAssertFalse(serialized.contains(active.peers[0].publicKey.base64Key))
     }
 
     private func configuration(
-        allowed: [String], excluded: [String] = [], endpoint: Endpoint? = nil
+        allowed: [String], excluded: [String] = [], endpoint: Endpoint? = nil,
+        address: [String] = ["192.0.2.2/24"]
     ) -> TunnelConfiguration {
+        var interface = InterfaceConfiguration(privateKey: PrivateKey())
+        interface.addresses = address.map { IPAddressRange(from: $0)! }
         var peer = PeerConfiguration(publicKey: PrivateKey().publicKey)
         peer.preSharedKey = PreSharedKey(rawValue: PrivateKey().rawValue)!
         peer.allowedIPs = allowed.map { IPAddressRange(from: $0)! }
         peer.excludeIPs = excluded.map { IPAddressRange(from: $0)! }
         peer.endpoint = endpoint
-        return TunnelConfiguration(name: nil, interface: InterfaceConfiguration(privateKey: PrivateKey()), peers: [peer])
+        return TunnelConfiguration(name: nil, interface: interface, peers: [peer])
     }
 }

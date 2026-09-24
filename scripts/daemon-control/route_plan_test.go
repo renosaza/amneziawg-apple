@@ -15,7 +15,7 @@ func TestRoutePlanStartIsValidatedBeforeBackendStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	config := "private_key=synthetic\nallowed_ip=192.0.2.0/24\nendpoint=192.0.2.10:51820"
-	valid := `{"routes":[{"destination":"192.0.2.0/24","owner":"tunnel"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"}]}`
+	valid := `{"local_address":"192.0.2.2/32","routes":[{"destination":"192.0.2.0/24","owner":"tunnel"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"}]}`
 	response := exchange(t, server, 501, requestFrame(t, fmt.Sprintf(`{"version":1,"operation":"start","profile_id":"%s","config":%q,"route_plan":%s}`, profileID, config, valid)))
 	if !response.OK {
 		t.Fatalf("valid plan: %#v", response)
@@ -69,10 +69,27 @@ func TestRoutePlanIsStartOnly(t *testing.T) {
 	}
 }
 
+func TestRoutePlanRequiresCanonicalIPv4LocalAddress(t *testing.T) {
+	if err := validRoutePlan([]byte(`{"local_address":"192.0.2.2/32","routes":[]}`)); err != nil {
+		t.Fatalf("valid local address: %v", err)
+	}
+	for _, plan := range []string{
+		`{"routes":[]}`,
+		`{"local_address":"not-an-address","routes":[]}`,
+		`{"local_address":"192.0.2.2/24","routes":[]}`,
+		`{"local_address":"192.0.2.2/32,192.0.2.3/32","routes":[]}`,
+		`{"local_address":"2001:db8::2/128","routes":[]}`,
+	} {
+		if err := validRoutePlan([]byte(plan)); err == nil {
+			t.Fatalf("accepted invalid local address: %s", plan)
+		}
+	}
+}
+
 func TestRoutePlanMustMatchUAPIBeforeBackendStart(t *testing.T) {
 	const secret = "synthetic-private-key"
 	const config = "private_key=" + secret + "\npublic_key=peer-one\nallowed_ip=10.25.0.0/24\nendpoint=192.0.2.10:51820\npublic_key=peer-two\nallowed_ip=10.1.1.2/32\nendpoint=198.51.100.20:51820\n"
-	const validPlan = `{"routes":[{"destination":"10.25.0.0/24","owner":"tunnel"},{"destination":"10.1.1.2/32","owner":"tunnel"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"},{"destination":"198.51.100.20/32","owner":"physicalEndpoint"}]}`
+	const validPlan = `{"local_address":"10.25.0.2/32","routes":[{"destination":"10.25.0.0/24","owner":"tunnel"},{"destination":"10.1.1.2/32","owner":"tunnel"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"},{"destination":"198.51.100.20/32","owner":"physicalEndpoint"}]}`
 	const tunnelOnlyPlan = `{"routes":[{"destination":"10.25.0.0/24","owner":"tunnel"}]}`
 	const hostnameConfig = "private_key=" + secret + "\nallowed_ip=10.25.0.0/24\nendpoint=vpn.example.test:51820\n"
 	const endpointWithoutRouteConfig = "private_key=" + secret + "\nallowed_ip=10.25.0.0/24\nendpoint=192.0.2.10:51820\n"
