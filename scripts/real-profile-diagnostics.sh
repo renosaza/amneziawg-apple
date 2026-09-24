@@ -6,6 +6,9 @@
 set -euo pipefail
 
 readonly launchd_label=com.amneziawg.daemon-control-poc
+readonly installed_daemon=/usr/local/libexec/amneziawg-daemon-control-poc
+readonly installed_backend=/usr/local/libexec/amneziawg-go-daemon-control-poc
+readonly diagnostic_log="$HOME/Library/Logs/AmneziaWGDaemon/daemon-diagnostics.log"
 
 usage() {
     cat >&2 <<'EOF_USAGE'
@@ -13,9 +16,11 @@ Usage:
   scripts/real-profile-diagnostics.sh --route <IPv4> [<IPv4> ...]
   scripts/real-profile-diagnostics.sh --utuns
   scripts/real-profile-diagnostics.sh --daemon-status
+  scripts/real-profile-diagnostics.sh --app-diagnostics [max-lines]
+  scripts/real-profile-diagnostics.sh --installed-artifacts
   scripts/real-profile-diagnostics.sh --self-check
 
-The helper reads selected route fields, utun names, or the LaunchDaemon state.
+The helper reads selected route fields, utun names, LaunchDaemon state, or opt-in app diagnostics.
 It never reads VPN profiles, Keychain items, UAPI sockets, or configuration text.
 EOF_USAGE
     exit 64
@@ -68,6 +73,26 @@ show_daemon_status() {
     '
 }
 
+show_app_diagnostics() {
+    local max_lines=${1:-200}
+    [[ $max_lines =~ ^([1-9]|[1-9][0-9]|1[0-9][0-9]|200)$ ]] || usage
+    [[ -f $diagnostic_log && ! -L $diagnostic_log ]] || return 0
+    # The file has only records produced by DaemonDiagnostics. The fixed line limit bounds output.
+    /usr/bin/tail -n "$max_lines" "$diagnostic_log" | /usr/bin/awk '/Daemon diagnostic:/'
+}
+
+show_installed_artifacts() {
+    local artifact
+    for artifact in "$installed_daemon" "$installed_backend"; do
+        if [[ -f $artifact && ! -L $artifact ]]; then
+            /usr/bin/basename "$artifact"
+            /usr/bin/shasum -a 256 "$artifact" | /usr/bin/awk '{print "sha256=" $1}'
+        else
+            printf '%s\n' "$(/usr/bin/basename "$artifact") absent"
+        fi
+    done
+}
+
 case ${1:-} in
     --self-check)
         [[ $# == 1 ]] || usage
@@ -88,6 +113,15 @@ case ${1:-} in
     --daemon-status)
         [[ $# == 1 ]] || usage
         show_daemon_status
+        ;;
+    --app-diagnostics)
+        shift
+        (( $# <= 1 )) || usage
+        show_app_diagnostics "${1:-15}"
+        ;;
+    --installed-artifacts)
+        [[ $# == 1 ]] || usage
+        show_installed_artifacts
         ;;
     *)
         usage

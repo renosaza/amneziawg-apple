@@ -33,10 +33,25 @@ enum DaemonControlClientError: Error, Equatable {
     case invalidResponse
     case incompatibleDaemon
     case daemonRejected
+
+    var diagnosticCode: String {
+        switch self {
+        case .invalidSocketPath: return "invalid_socket_path"
+        case .invalidTimeout: return "invalid_timeout"
+        case .invalidConfiguration: return "invalid_configuration"
+        case .connectionFailed: return "connection_failed"
+        case .timedOut: return "timed_out"
+        case .invalidResponse: return "invalid_response"
+        case .incompatibleDaemon: return "incompatible_daemon"
+        case .daemonRejected: return "daemon_rejected"
+        }
+    }
 }
 
 /// macOS client for the version 1 daemon-control POC protocol.
 final class DaemonControlClient {
+    /// Assigned by the daemon GUI only. The client never records request or response bytes.
+    static var diagnosticHandler: ((String, [String: String]) -> Void)?
     private let socketPath: String
     private let timeout: TimeInterval
 
@@ -50,17 +65,44 @@ final class DaemonControlClient {
     }
 
     func list() throws -> [DaemonControlProfileStatus] {
-        try verifyCompatibility()
-        return try DaemonControlProtocol.decodeListResponse(request(operation: "list", profileID: nil))
+        do {
+            try verifyCompatibility()
+            let statuses = try DaemonControlProtocol.decodeListResponse(request(operation: "list", profileID: nil))
+            let states = Dictionary(grouping: statuses, by: \.state.rawValue).map {
+                "\($0.key):\($0.value.count)"
+            }.sorted().joined(separator: ",")
+            record("list", fields: ["profiles": "\(statuses.count)", "states": states])
+            return statuses
+        } catch {
+            recordError(operation: "list", error: error)
+            throw error
+        }
     }
 
     func status(profileID: UUID) throws -> DaemonControlProfileStatus {
-        try verifyCompatibility()
-        return try DaemonControlProtocol.decodeStatusResponse(request(operation: "status", profileID: profileID), expectedProfileID: profileID)
+        do {
+            try verifyCompatibility()
+            let status = try DaemonControlProtocol.decodeStatusResponse(
+                request(operation: "status", profileID: profileID), expectedProfileID: profileID)
+            record("status", fields: ["state": status.state.rawValue])
+            return status
+        } catch {
+            recordError(operation: "status", error: error)
+            throw error
+        }
     }
 
     func capabilities() throws -> DaemonControlCapabilities {
-        try DaemonControlProtocol.decodeHelloResponse(request(operation: "hello", profileID: nil))
+        do {
+            let capabilities = try DaemonControlProtocol.decodeHelloResponse(request(operation: "hello", profileID: nil))
+            record("hello", fields: [
+                "capabilities": capabilities.values.sorted().joined(separator: ",")
+            ])
+            return capabilities
+        } catch {
+            recordError(operation: "hello", error: error)
+            throw error
+        }
     }
 
     func start<RoutePlan: Encodable>(
@@ -68,24 +110,46 @@ final class DaemonControlClient {
         uapiConfiguration: String,
         routePlan: RoutePlan
     ) throws -> DaemonControlProfileStatus {
-        try verifyCompatibility()
-        let response = try request(
-            operation: "start",
-            profileID: profileID,
-            uapiConfiguration: uapiConfiguration,
-            routePlan: routePlan
-        )
-        return try DaemonControlProtocol.decodeStartResponse(response, expectedProfileID: profileID)
+        do {
+            try verifyCompatibility()
+            let response = try request(
+                operation: "start",
+                profileID: profileID,
+                uapiConfiguration: uapiConfiguration,
+                routePlan: routePlan
+            )
+            let status = try DaemonControlProtocol.decodeStartResponse(response, expectedProfileID: profileID)
+            record("start", fields: ["state": status.state.rawValue])
+            return status
+        } catch {
+            recordError(operation: "start", error: error)
+            throw error
+        }
     }
 
     func stop(profileID: UUID) throws {
-        try verifyCompatibility()
-        let response = try request(operation: "stop", profileID: profileID)
-        try DaemonControlProtocol.decodeStopResponse(response, expectedProfileID: profileID)
+        do {
+            try verifyCompatibility()
+            let response = try request(operation: "stop", profileID: profileID)
+            try DaemonControlProtocol.decodeStopResponse(response, expectedProfileID: profileID)
+            record("stop", fields: ["state": "stopped"])
+        } catch {
+            recordError(operation: "stop", error: error)
+            throw error
+        }
     }
 
     private func verifyCompatibility() throws {
         _ = try capabilities()
+    }
+
+    private func record(_ event: String, fields: [String: String]) {
+        Self.diagnosticHandler?(event, fields)
+    }
+
+    private func recordError(operation: String, error: Error) {
+        let code = (error as? DaemonControlClientError)?.diagnosticCode ?? "unknown_error"
+        record("protocol_error", fields: ["operation": operation, "class": code])
     }
 
     private func request(operation: String, profileID: UUID?, uapiConfiguration: String? = nil) throws -> Data {

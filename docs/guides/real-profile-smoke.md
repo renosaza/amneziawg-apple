@@ -21,6 +21,48 @@ Do this on a Mac you control, with profiles imported locally through the GUI.
 Never put an exported profile, key material, full diagnostic output, or a
 private endpoint into an issue, CI log, or repository.
 
+## Collect a safe diagnostic record while the official VPN stays on
+
+You do not need to turn off the official AmneziaWG/AmneziaVPN tunnel before
+collecting this record. It only reads the macOS route table and the daemon GUI's
+opt-in records in `~/Library/Logs/AmneziaWGDaemon/daemon-diagnostics.log`; it does not start, stop, import, edit, or route any
+VPN profile.
+
+Before opening the daemon GUI, enable the local diagnostic switch for its
+bundle identifier:
+
+```sh
+defaults write com.renosaza.amneziawg.daemon-gui DaemonDiagnosticLogging -bool YES
+```
+
+In the GUI, import a profile and attempt the action being diagnosed. Then run:
+
+```sh
+./Daemon/real-profile-diagnostics.sh --app-diagnostics 200
+./Daemon/real-profile-diagnostics.sh --daemon-status
+./Daemon/real-profile-diagnostics.sh --utuns
+./Daemon/real-profile-diagnostics.sh --installed-artifacts
+```
+
+The record contains only a random operation ID, hello capability names, validation
+outcome, route-owner counts, `running`/`degraded`/`stopped` states, installed
+binary SHA-256 values, and fixed protocol error classes.
+It deliberately omits profile names, route destinations, endpoints, interface
+addresses, UAPI text, and all keys. Send only its output together with the
+redacted report below. Disable it when finished:
+
+```sh
+defaults delete com.renosaza.amneziawg.daemon-gui DaemonDiagnosticLogging
+```
+
+With an existing full tunnel already active, a split-profile preflight is still
+useful: `profile_validation=accepted` and a plan containing
+`physical_endpoint` show that the daemon accepted the requested shape. It does
+not prove that the corporate endpoint uses the physical uplink until its route
+is checked locally. Do not enable the daemon full-profile test under an
+unrelated existing VPN: its physical endpoint choice is ambiguous in that
+state. Keep that profile inactive and report the preflight result instead.
+
 ## Prepare
 
 1. Obtain a reviewed unsigned CI package, unpack it, inspect `MANIFEST.json`,

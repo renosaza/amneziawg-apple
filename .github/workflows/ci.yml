@@ -38,6 +38,8 @@ jobs:
         run: scripts/test-daemon-full-route-poc.sh
       - name: Test the read-only macOS daemon-control client
         run: scripts/test-daemon-control-client.sh
+      - name: Test the secret-safe daemon diagnostics boundary
+        run: scripts/test-daemon-diagnostics.sh
       - name: Test unsigned daemon GUI target boundaries
         run: scripts/test-unsigned-daemon-gui-target.sh
       - name: Test unsigned macOS release workflow boundaries
