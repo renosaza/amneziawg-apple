@@ -21,6 +21,10 @@ Do this on a Mac you control, with profiles imported locally through the GUI.
 Never put an exported profile, key material, full diagnostic output, or a
 private endpoint into an issue, CI log, or repository.
 
+The daemon supports multiple non-overlapping IPv4 split profiles. Its
+full-profile path is a separate opt-in experiment; do not run it while an
+official full VPN is active.
+
 ## Collect a safe diagnostic record while the official VPN stays on
 
 You do not need to turn off the official AmneziaWG/AmneziaVPN tunnel before
