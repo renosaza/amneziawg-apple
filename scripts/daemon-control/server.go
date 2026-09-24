@@ -375,27 +375,36 @@ func validRoutePlanMatchesConfig(raw json.RawMessage, config string) error {
 		return errors.New("invalid route plan")
 	}
 
-	allowedIPs := make([]netip.Prefix, 0)
-	endpoints := make(map[netip.Addr]struct{})
+	var allowedIP netip.Prefix
+	var endpoint netip.Addr
+	var peers, allowedIPs, endpoints int
 	for _, line := range strings.Split(config, "\n") {
 		key, value, _ := strings.Cut(line, "=")
 		switch key {
+		case "public_key":
+			peers++
 		case "allowed_ip":
 			prefix, err := netip.ParsePrefix(value)
-			if err != nil {
+			if err != nil || !prefix.Addr().Is4() || prefix != prefix.Masked() {
 				return errors.New("invalid route plan")
 			}
-			allowedIPs = append(allowedIPs, prefix.Masked())
+			allowedIPs++
+			allowedIP = prefix
 		case "endpoint":
-			endpoint, err := netip.ParseAddrPort(value)
-			if err != nil {
+			address, err := netip.ParseAddrPort(value)
+			if err != nil || !address.Addr().Is4() {
 				return errors.New("invalid route plan")
 			}
-			endpoints[endpoint.Addr()] = struct{}{}
+			endpoints++
+			endpoint = address.Addr()
 		}
 	}
-
-	physicalEndpoints := make(map[netip.Addr]struct{})
+	if peers != 1 || allowedIPs != 1 || endpoints != 1 {
+		return errors.New("invalid route plan")
+	}
+	var tunnelRoute netip.Prefix
+	var physicalEndpoint netip.Addr
+	var tunnels, physicalEndpoints int
 	for _, route := range routes {
 		prefix, err := netip.ParsePrefix(route.Destination)
 		if err != nil {
@@ -403,31 +412,17 @@ func validRoutePlanMatchesConfig(raw json.RawMessage, config string) error {
 		}
 		switch route.Owner {
 		case "tunnel":
-			if !containsPrefix(allowedIPs, prefix) {
-				return errors.New("invalid route plan")
-			}
+			tunnels++
+			tunnelRoute = prefix
 		case "physicalEndpoint":
-			if _, found := endpoints[prefix.Addr()]; !found {
-				return errors.New("invalid route plan")
-			}
-			physicalEndpoints[prefix.Addr()] = struct{}{}
+			physicalEndpoints++
+			physicalEndpoint = prefix.Addr()
 		}
 	}
-	for endpoint := range endpoints {
-		if _, found := physicalEndpoints[endpoint]; !found {
-			return errors.New("invalid route plan")
-		}
+	if tunnels != 1 || physicalEndpoints != 1 || tunnelRoute != allowedIP || physicalEndpoint != endpoint {
+		return errors.New("invalid route plan")
 	}
 	return nil
-}
-
-func containsPrefix(prefixes []netip.Prefix, candidate netip.Prefix) bool {
-	for _, prefix := range prefixes {
-		if prefix.Bits() <= candidate.Bits() && prefix.Contains(candidate.Addr()) {
-			return true
-		}
-	}
-	return false
 }
 
 func validConfig(config string) error {

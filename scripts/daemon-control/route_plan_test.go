@@ -24,7 +24,7 @@ func TestRoutePlanStartIsValidatedBeforeBackendStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	config := "private_key=synthetic\nallowed_ip=192.0.2.0/24\nendpoint=192.0.2.10:51820"
+	config := "private_key=synthetic\npublic_key=peer\nallowed_ip=192.0.2.0/24\nendpoint=192.0.2.10:51820"
 	valid := `{"local_address":"192.0.2.2/32","routes":[{"destination":"192.0.2.0/24","owner":"tunnel"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"}]}`
 	response := exchange(t, server, 501, requestFrame(t, fmt.Sprintf(`{"version":1,"operation":"start","profile_id":"%s","config":%q,"route_plan":%s}`, profileID, config, valid)))
 	if response.OK || response.Error != "start_failed" {
@@ -50,7 +50,7 @@ func TestRoutePlanPartialStartRetainsSingletonReservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const config = "private_key=synthetic\nallowed_ip=192.0.2.0/24\nendpoint=192.0.2.10:51820"
+	const config = "private_key=synthetic\npublic_key=peer\nallowed_ip=192.0.2.0/24\nendpoint=192.0.2.10:51820"
 	const plan = `{"local_address":"192.0.2.2/32","routes":[{"destination":"192.0.2.0/24","owner":"tunnel"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"}]}`
 	for _, id := range []string{profileID, profileIDTwo} {
 		response := exchange(t, server, 501, requestFrame(t, fmt.Sprintf(
@@ -127,43 +127,34 @@ func TestRoutePlanRequiresCanonicalIPv4LocalAddress(t *testing.T) {
 	}
 }
 
-func TestRoutePlanMustMatchUAPIBeforeBackendStart(t *testing.T) {
+func TestRoutePlanRequiresOneExactUAPIPeerBeforeBackendStart(t *testing.T) {
 	const secret = "synthetic-private-key"
-	const config = "private_key=" + secret + "\npublic_key=peer-one\nallowed_ip=10.25.0.0/24\nendpoint=192.0.2.10:51820\npublic_key=peer-two\nallowed_ip=10.1.1.2/32\nendpoint=198.51.100.20:51820\n"
-	const validPlan = `{"local_address":"10.25.0.2/32","routes":[{"destination":"10.25.0.0/24","owner":"tunnel"},{"destination":"10.1.1.2/32","owner":"tunnel"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"},{"destination":"198.51.100.20/32","owner":"physicalEndpoint"}]}`
-	const tunnelOnlyPlan = `{"routes":[{"destination":"10.25.0.0/24","owner":"tunnel"}]}`
-	const hostnameConfig = "private_key=" + secret + "\nallowed_ip=10.25.0.0/24\nendpoint=vpn.example.test:51820\n"
-	const endpointWithoutRouteConfig = "private_key=" + secret + "\nallowed_ip=10.25.0.0/24\nendpoint=192.0.2.10:51820\n"
+	const plan = `{"local_address":"10.25.0.2/32","routes":[{"destination":"10.25.0.0/24","owner":"tunnel"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"}]}`
+	const validConfig = "private_key=" + secret + "\npublic_key=peer-one\nallowed_ip=10.25.0.0/24\nendpoint=192.0.2.10:51820\n"
 
 	backend := &fakeBackend{}
 	server, err := NewServerWithBackend(501, backend)
 	if err != nil {
 		t.Fatal(err)
 	}
-	response := exchange(t, server, 501, requestFrame(t, fmt.Sprintf(
-		`{"version":1,"operation":"start","profile_id":"%s","config":%q,"route_plan":%s}`,
-		profileID, config, validPlan,
-	)))
+	response := exchange(t, server, 501, requestFrame(t, fmt.Sprintf(`{"version":1,"operation":"start","profile_id":"%s","config":%q,"route_plan":%s}`, profileID, validConfig, plan)))
 	if response.OK || response.Error != "start_failed" {
-		t.Fatalf("unsupported backend accepted multi-peer plan: %#v", response)
+		t.Fatalf("unsupported backend accepted valid plan: %#v", response)
 	}
 	if starts, _ := backend.counts(); starts != 0 {
 		t.Fatalf("starts=%d", starts)
 	}
 
-	for index, invalid := range []struct {
-		config string
-		plan   string
-	}{
-		{config, strings.Replace(validPlan, "10.25.0.0/24", "10.26.0.0/24", 1)},
-		{config, strings.Replace(validPlan, "198.51.100.20/32", "198.51.100.21/32", 1)},
-		{hostnameConfig, tunnelOnlyPlan},
-		{endpointWithoutRouteConfig, tunnelOnlyPlan},
+	for index, invalid := range []string{
+		strings.Replace(validConfig, "allowed_ip=10.25.0.0/24", "allowed_ip=10.25.0.0/24\nallowed_ip=10.1.1.2/32", 1),
+		strings.Replace(validConfig, "public_key=peer-one", "public_key=peer-one\npublic_key=peer-two", 1),
+		strings.Replace(validConfig, "allowed_ip=10.25.0.0/24", "allowed_ip=10.1.1.2/32", 1),
+		strings.Replace(validConfig, "endpoint=192.0.2.10:51820", "endpoint=192.0.2.11:51820", 1),
 	} {
 		id := fmt.Sprintf("aaaaaaaa-2222-4333-8444-%012x", index+1)
 		response := exchange(t, server, 501, requestFrame(t, fmt.Sprintf(
 			`{"version":1,"operation":"start","profile_id":"%s","config":%q,"route_plan":%s}`,
-			id, invalid.config, invalid.plan,
+			id, invalid, plan,
 		)))
 		if response.OK || response.Error != "invalid_request" {
 			t.Fatalf("invalid plan %d: %#v", index, response)
