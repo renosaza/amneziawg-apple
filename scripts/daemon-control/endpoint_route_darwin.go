@@ -39,10 +39,13 @@ func configurePlannedPhysicalEndpointRoute(target netip.Addr) (*PhysicalEndpoint
 	if err != nil || existing.Err != nil || configured.isTargetHostRoute(existing) {
 		return nil, fmt.Errorf("planned endpoint preflight: %w", errors.Join(err, existing.Err))
 	}
-	configured.basePrefix, _ = routePrefix(existing)
 	configured.gateway, configured.iface, err = physicalGateway(existing)
-	if err != nil || !configured.basePrefix.IsValid() {
+	if err != nil {
 		return nil, fmt.Errorf("planned endpoint preflight: %w", errors.Join(err, errors.New("effective endpoint route unavailable")))
+	}
+	configured.basePrefix, err = configured.findBaseRoute(target)
+	if err != nil {
+		return nil, fmt.Errorf("planned endpoint preflight: %w", err)
 	}
 	if err := configured.add(); err != nil {
 		return configured.cleanupFailedRouteAdd(fmt.Errorf("planned endpoint add: %w", err))
@@ -51,6 +54,46 @@ func configurePlannedPhysicalEndpointRoute(target netip.Addr) (*PhysicalEndpoint
 		return configured.cleanupFailedRouteAdd(fmt.Errorf("planned endpoint verify-base-rib: %w", errors.Join(err, errors.New("effective endpoint route changed"))))
 	}
 	return configured, nil
+}
+
+func (configured *PhysicalEndpointRoute) findBaseRoute(target netip.Addr) (netip.Prefix, error) {
+	rib, err := route.FetchRIB(syscall.AF_INET, route.RIBTypeRoute, 0)
+	if err != nil {
+		return netip.Prefix{}, err
+	}
+	messages, err := route.ParseRIB(route.RIBTypeRoute, rib)
+	if err != nil {
+		return netip.Prefix{}, err
+	}
+	return selectBaseRoute(messages, target, configured.gateway, configured.iface)
+}
+
+func selectBaseRoute(messages []route.Message, target, gateway netip.Addr, iface *net.Interface) (netip.Prefix, error) {
+	var selected netip.Prefix
+	for _, parsed := range messages {
+		message, ok := parsed.(*route.RouteMessage)
+		if !ok {
+			continue
+		}
+		prefix, ok := routePrefix(message)
+		if !ok || !prefix.Contains(target) {
+			continue
+		}
+		actualGateway, actualIface, err := physicalGateway(message)
+		if err != nil || actualGateway != gateway || actualIface.Index != iface.Index || actualIface.Name != iface.Name {
+			continue
+		}
+		if selected.IsValid() && selected.Bits() == prefix.Bits() && selected != prefix {
+			return netip.Prefix{}, errors.New("ambiguous base route")
+		}
+		if !selected.IsValid() || prefix.Bits() > selected.Bits() {
+			selected = prefix
+		}
+	}
+	if !selected.IsValid() {
+		return netip.Prefix{}, errors.New("base route unavailable")
+	}
+	return selected, nil
 }
 
 func configureSyntheticPhysicalEndpointRoute(targetText string) (*PhysicalEndpointRoute, error) {
