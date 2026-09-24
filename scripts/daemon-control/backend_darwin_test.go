@@ -65,3 +65,17 @@ func TestPlannedPeerEndpointResetRetainsOnlyPublicPeerAndLiteralEndpoint(t *test
 		t.Fatal("accepted an endpoint that differs from the route plan")
 	}
 }
+
+func TestEndpointRefreshRemainsPendingUntilUAPISucceeds(t *testing.T) {
+	process := &tunnelProcess{endpointRefreshPending: true}
+	if !process.needsEndpointRefresh(false) {
+		t.Fatal("failed endpoint refresh was discarded")
+	}
+	process.endpointRefreshPending = false
+	if process.needsEndpointRefresh(false) {
+		t.Fatal("successful endpoint refresh remained pending")
+	}
+	if !process.needsEndpointRefresh(true) {
+		t.Fatal("changed endpoint did not request refresh")
+	}
+}

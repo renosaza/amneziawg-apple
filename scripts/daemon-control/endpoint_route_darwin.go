@@ -308,6 +308,11 @@ func (configured *PhysicalEndpointRoute) Rebind() (bool, error) {
 		return configured.reconcileRebindFailure(next, err)
 	}
 	if err := configured.verifyWithBase(next); err != nil {
+		// The route change can succeed while the post-change RIB proof is
+		// incomplete. Retain actual new ownership so Stop can still clean it.
+		if owns, ownershipErr := configured.ownsRouteWithBase(next); ownershipErr == nil && owns {
+			configured.setBase(next)
+		}
 		return false, err
 	}
 	configured.setBase(next)
@@ -348,14 +353,46 @@ func (configured *PhysicalEndpointRoute) setBase(base physicalBaseRoute) {
 }
 
 func (configured *PhysicalEndpointRoute) reconcileRebindFailure(next physicalBaseRoute, writeErr error) (bool, error) {
-	if configured.verifyWithBase(next) == nil {
-		configured.setBase(next)
-		return true, nil
+	nextOwned, nextErr := configured.ownsRouteWithBase(next)
+	current := configured.currentBase()
+	currentOwned, currentErr := configured.ownsRouteWithBase(current)
+	base, stateErr := resolvedRebindBase(current, next, nextErr == nil && nextOwned, currentErr == nil && currentOwned)
+	configured.setBase(base)
+	if stateErr == nil {
+		if configured.baseRouteInRIBError() == nil {
+			return true, nil
+		}
+		return false, fmt.Errorf("endpoint rebind changed without RIB proof: %w", writeErr)
 	}
-	if configured.verify() == nil {
-		return false, fmt.Errorf("endpoint rebind rejected: %w", writeErr)
+	return false, fmt.Errorf("endpoint rebind %v: %w", stateErr, writeErr)
+}
+
+func resolvedRebindBase(current, next physicalBaseRoute, nextOwned, currentOwned bool) (physicalBaseRoute, error) {
+	if nextOwned {
+		return next, nil
 	}
-	return false, fmt.Errorf("endpoint rebind outcome unknown: %w", writeErr)
+	if currentOwned {
+		return current, errors.New("rejected")
+	}
+	return current, errors.New("outcome unknown")
+}
+
+func (configured *PhysicalEndpointRoute) ownsRouteWithBase(base physicalBaseRoute) (bool, error) {
+	message, err := configured.lookup()
+	if err != nil {
+		return false, err
+	}
+	if message == nil {
+		return false, errors.New("endpoint route lookup returned no message")
+	}
+	if message.Err != nil {
+		return false, message.Err
+	}
+	previous := configured.currentBase()
+	configured.setBase(base)
+	owned := configured.ownsRoute(message)
+	configured.setBase(previous)
+	return owned, nil
 }
 
 func (configured *PhysicalEndpointRoute) verifyWithBase(base physicalBaseRoute) error {

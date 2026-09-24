@@ -62,6 +62,7 @@ type tunnelProcess struct {
 	precedenceEndpointRoute *PhysicalEndpointRoute
 	routeSlot               int
 	degraded                bool
+	endpointRefreshPending  bool
 	peerPublicKey           string
 	peerEndpoint            string
 }
@@ -302,19 +303,31 @@ func (backend *tunnelBackend) Rebind(session Session) error {
 	if !ok || process.precedenceEndpointRoute == nil {
 		return nil
 	}
+	before := process.precedenceEndpointRoute.currentBase()
 	changed, err := process.precedenceEndpointRoute.Rebind()
+	if !samePhysicalBaseRoute(before, process.precedenceEndpointRoute.currentBase()) {
+		process.endpointRefreshPending = true
+	}
 	if err != nil {
 		process.degraded = true
 		return err
 	}
-	if changed {
+	if process.needsEndpointRefresh(changed) {
 		if err := uapi(process.name, "set=1\npublic_key="+process.peerPublicKey+"\nendpoint="+process.peerEndpoint); err != nil {
 			process.degraded = true
 			return err
 		}
+		process.endpointRefreshPending = false
 	}
 	process.degraded = false
 	return nil
+}
+
+func (process *tunnelProcess) needsEndpointRefresh(changed bool) bool {
+	if changed {
+		process.endpointRefreshPending = true
+	}
+	return process.endpointRefreshPending
 }
 
 // plannedPeerEndpointReset keeps only a validated public peer identifier and

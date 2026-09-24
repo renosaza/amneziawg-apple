@@ -370,6 +370,19 @@ func TestEndpointRebindRouteWriteUsesReplacementOnly(t *testing.T) {
 	}
 }
 
+func TestEndpointRebindRetainsActualNewOwnershipOnUncertainReply(t *testing.T) {
+	current := physicalBaseRoute{prefix: netip.MustParsePrefix("192.0.2.0/24"), gateway: netip.MustParseAddr("192.0.2.1"), iface: &net.Interface{Index: 7, Name: "en0"}}
+	next := physicalBaseRoute{prefix: netip.MustParsePrefix("198.51.100.0/24"), gateway: netip.MustParseAddr("198.51.100.1"), iface: &net.Interface{Index: 8, Name: "en1"}}
+	actual, err := resolvedRebindBase(current, next, true, false)
+	if err != nil || !samePhysicalBaseRoute(actual, next) {
+		t.Fatalf("new ownership was not retained: %#v %v", actual, err)
+	}
+	actual, err = resolvedRebindBase(current, next, false, true)
+	if err == nil || !samePhysicalBaseRoute(actual, current) {
+		t.Fatalf("old ownership was not retained: %#v %v", actual, err)
+	}
+}
+
 func physicalRouteMessage(index, flags int, destination, gateway [4]byte, name string) *route.RouteMessage {
 	addrs := make([]route.Addr, syscall.RTAX_IFP+1)
 	addrs[syscall.RTAX_DST] = &route.Inet4Addr{IP: destination}
