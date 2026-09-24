@@ -80,6 +80,7 @@ func main() {
 	uidText := flag.String("uid", "", "authorized non-root macOS UID")
 	binaryPath := flag.String("binary", "", "trusted absolute amneziawg-go path")
 	allowRoutePlans := flag.Bool("allow-route-plan-runtime", false, "enable the experimental root-controlled route-plan runtime")
+	allowFullRoutes := flag.Bool("allow-full-route-runtime", false, "enable experimental logical IPv4 full-route plans (requires -allow-route-plan-runtime)")
 	checkIdle := flag.Bool("check-idle", false, "exit successfully only when the daemon has no sessions")
 	prepareStop := flag.Bool("prepare-stop", false, "atomically refuse new sessions when the daemon is idle")
 	manualRoutePlanStart := flag.Bool("manual-route-plan-start", false, "send the fixed synthetic route-plan start request")
@@ -176,12 +177,16 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: daemon-control-poc -socket /var/run/name.sock -uid <macOS-uid> -binary /root-owned/amneziawg-go")
 		os.Exit(2)
 	}
+	if *allowFullRoutes && !*allowRoutePlans {
+		fmt.Fprintln(os.Stderr, "-allow-full-route-runtime requires -allow-route-plan-runtime")
+		os.Exit(2)
+	}
 	uid, err := parseUID(*uidText)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	backend, err := daemoncontrol.NewTunnelBackendWithRoutePlanRuntime(*binaryPath, *allowRoutePlans)
+	backend, err := daemoncontrol.NewTunnelBackendWithFullRouteRuntime(*binaryPath, *allowRoutePlans, *allowFullRoutes)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
