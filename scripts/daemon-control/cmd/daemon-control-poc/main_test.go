@@ -282,3 +282,33 @@ func TestManualFullRoutePlanStartAndStopAreFixed(t *testing.T) {
 		t.Fatalf("unexpected full-route stop: %#v %#v", helloStop, stop)
 	}
 }
+
+func TestDaemonExchangeReportsOnlyKnownNonSecretErrorCodes(t *testing.T) {
+	for _, test := range []struct {
+		name, response, want string
+	}{
+		{"start", `{"ok":false,"error":"start_failed"}`, "daemon control rejected start_failed"},
+		{"unknown", `{"ok":false,"error":"private_key=should-not-echo"}`, "daemon control rejected control operation"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := shortSocketPath(t)
+			listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			go func() {
+				connection, err := listener.AcceptUnix()
+				if err != nil {
+					return
+				}
+				defer connection.Close()
+				_, _ = readFrame(connection)
+				_ = writeFrame(connection, []byte(test.response))
+			}()
+			if _, err := daemonRequest(path, "list"); err == nil || err.Error() != test.want {
+				t.Fatalf("error=%v want %q", err, test.want)
+			}
+		})
+	}
+}
