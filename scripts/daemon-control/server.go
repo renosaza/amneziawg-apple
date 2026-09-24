@@ -173,6 +173,9 @@ func (server *Server) apply(request request) response {
 		if err := validRoutePlanMatchesConfig(request.RoutePlan, request.Config); err != nil {
 			return response{Error: "invalid_request"}
 		}
+		if request.RoutePlan == nil && hasDefaultAllowedIP(request.Config) {
+			return response{Error: "invalid_request"}
+		}
 		var reservation routePlanReservation
 		if request.RoutePlan != nil {
 			var err error
@@ -392,10 +395,17 @@ func validRoutePlan(raw json.RawMessage) error {
 	seen := make(map[netip.Prefix]struct{}, len(routes))
 	for _, route := range routes {
 		prefix, err := netip.ParsePrefix(route.Destination)
-		if err != nil || !usableIPv4Address(prefix.Addr()) || prefix != prefix.Masked() || prefix.String() != route.Destination || prefix.Bits() <= 1 {
+		if err != nil || !prefix.Addr().Is4() || prefix != prefix.Masked() || prefix.String() != route.Destination {
 			return errors.New("invalid route plan")
 		}
-		if route.Owner != "tunnel" && route.Owner != "physicalEndpoint" {
+		if route.Owner != "tunnel" && route.Owner != "physicalEndpoint" && route.Owner != "excluded" {
+			return errors.New("invalid route plan")
+		}
+		isDefaultTunnel := route.Owner == "tunnel" && prefix.Bits() == 0 && prefix.Addr().IsUnspecified()
+		if !isDefaultTunnel && (!usableIPv4Address(prefix.Addr()) || prefix.Bits() <= 1) {
+			return errors.New("invalid route plan")
+		}
+		if route.Owner == "tunnel" && prefix.Bits() == 0 && !isDefaultTunnel {
 			return errors.New("invalid route plan")
 		}
 		if route.Owner == "physicalEndpoint" && prefix.Bits() != 32 {
@@ -470,6 +480,7 @@ func validRoutePlanMatchesConfig(raw json.RawMessage, config string) error {
 	var tunnelRoute netip.Prefix
 	var physicalEndpoint netip.Addr
 	var tunnels, physicalEndpoints int
+	var hasExcludedRoutes bool
 	for _, route := range routes {
 		prefix, err := netip.ParsePrefix(route.Destination)
 		if err != nil {
@@ -482,7 +493,15 @@ func validRoutePlanMatchesConfig(raw json.RawMessage, config string) error {
 		case "physicalEndpoint":
 			physicalEndpoints++
 			physicalEndpoint = prefix.Addr()
+		case "excluded":
+			hasExcludedRoutes = true
 		}
+	}
+	// ExcludeIPs is a NetworkExtension-only field and is intentionally absent
+	// from UAPI. A root daemon cannot bind an excluded route to trusted
+	// configuration, so it must reject it before any backend side effect.
+	if hasExcludedRoutes || allowedIP.Bits() == 0 {
+		return errors.New("unsupported route plan runtime")
 	}
 	if tunnels != 1 || physicalEndpoints != 1 || tunnelRoute != allowedIP || physicalEndpoint != endpoint {
 		return errors.New("invalid route plan")
@@ -510,6 +529,22 @@ func validConfig(config string) error {
 		}
 	}
 	return nil
+}
+
+// hasDefaultAllowedIP keeps legacy, route-free starts from creating a backend
+// session for a full-tunnel UAPI configuration. The daemon has no trusted
+// physical-bypass policy on that path.
+func hasDefaultAllowedIP(config string) bool {
+	for _, line := range strings.Split(config, "\n") {
+		key, value, _ := strings.Cut(line, "=")
+		if key != "allowed_ip" {
+			continue
+		}
+		if prefix, err := netip.ParsePrefix(value); err == nil && prefix.Bits() == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func validUUID(value string) bool {
