@@ -16,7 +16,13 @@ jobs:
         with:
           go-version-file: scripts/daemon-control/go.mod
           cache-dependency-path: scripts/daemon-control/go.sum
-      - name: Run three synthetic child lifecycles on the disposable runner
+      - name: Diagnose the TEST-NET planned endpoint RIB on the disposable runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          sudo env AMNEZIAWG_DAEMON_RUNTIME=1 go test -C scripts/daemon-control -v -tags manualruntime -run TestManualPlannedEndpointRIBDiagnostic -count=1
+      - name: Run the TEST-NET planned route lifecycle on the disposable runner
         shell: bash
         run: |
           set -euo pipefail
@@ -24,4 +30,4 @@ jobs:
           go build -C Sources/WireGuardKitGo -o ../../out/amneziawg-go github.com/amnezia-vpn/amneziawg-go/v3
           sudo install -d -o root -g wheel -m 0755 /usr/local/libexec
           sudo install -o root -g wheel -m 0755 out/amneziawg-go /usr/local/libexec/amneziawg-go-daemon-three-poc
-          sudo env AMNEZIAWG_DAEMON_RUNTIME=1 AMNEZIAWG_DAEMON_BINARY=/usr/local/libexec/amneziawg-go-daemon-three-poc go test -C scripts/daemon-control -v -tags manualruntime -run 'TestManual(SyntheticThreeTunnelLifecycle|RoutePlanStartAndCleanup)' -count=1
+          sudo env AMNEZIAWG_DAEMON_RUNTIME=1 AMNEZIAWG_DAEMON_BINARY=/usr/local/libexec/amneziawg-go-daemon-three-poc go test -C scripts/daemon-control -v -tags manualruntime -run TestManualRoutePlanStartAndCleanup -count=1

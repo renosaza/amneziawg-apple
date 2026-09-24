@@ -62,10 +62,14 @@ type tunnelProcess struct {
 }
 
 func newTunnelBackend(binary string) (Backend, error) {
+	return newTunnelBackendWithRoutePlanRuntime(binary, false)
+}
+
+func newTunnelBackendWithRoutePlanRuntime(binary string, allowRoutePlans bool) (Backend, error) {
 	if os.Geteuid() != 0 || !trustedBinary(binary) {
 		return nil, errors.New("real tunnel backend requires a trusted root executable")
 	}
-	return &tunnelBackend{binary: binary}, nil
+	return &tunnelBackend{binary: binary, allowRoutePlanRuntime: allowRoutePlans}, nil
 }
 
 func trustedBinary(path string) bool {
@@ -167,11 +171,14 @@ func (backend *tunnelBackend) start(config string, plan *routePlan) (Session, er
 			process.route, err = configureIPv4AddressOnly(process, local.String())
 			if err == nil {
 				backend.lastStartStage = "physical-endpoint"
-				process.precedenceEndpointRoute, err = configureSyntheticPrecedenceEndpointRoute(endpoint.String())
+				process.precedenceEndpointRoute, err = configurePlannedPhysicalEndpointRoute(endpoint)
+				if err != nil {
+					backend.lastStartStage = strings.Split(err.Error(), ":")[0]
+				}
 			}
 			if err == nil {
 				backend.lastStartStage = "split-route"
-				process.fallbackRoute, err = configureSyntheticSplitRoute(process, prefix)
+				process.fallbackRoute, err = configurePlannedSplitRoute(process, prefix, process.precedenceEndpointRoute)
 			}
 			if err == nil {
 				err = process.precedenceEndpointRoute.verify()
@@ -228,7 +235,7 @@ func manualPlanValues(plan routePlan) (netip.Addr, netip.Prefix, netip.Addr, err
 			endpoint = parsed.Addr()
 		}
 	}
-	if !local.Addr().Is4() || !syntheticIPv4Prefix.Contains(local.Addr()) || !prefix.IsValid() || !endpoint.IsValid() {
+	if !local.Addr().Is4() || !local.Addr().IsGlobalUnicast() || !prefix.IsValid() || !prefix.Addr().Is4() || prefix.Bits() < 2 || !endpoint.Is4() || !endpoint.IsGlobalUnicast() {
 		return netip.Addr{}, netip.Prefix{}, netip.Addr{}, errors.New("invalid manual route plan")
 	}
 	return local.Addr(), prefix, endpoint, nil

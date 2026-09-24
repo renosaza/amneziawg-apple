@@ -26,6 +26,7 @@ func main() {
 	socket := flag.String("socket", "", "root-owned directory socket path")
 	uidText := flag.String("uid", "", "authorized non-root macOS UID")
 	binaryPath := flag.String("binary", "", "trusted absolute amneziawg-go path")
+	allowRoutePlans := flag.Bool("allow-route-plan-runtime", false, "enable the experimental root-controlled route-plan runtime")
 	checkIdle := flag.Bool("check-idle", false, "exit successfully only when the daemon has no sessions")
 	prepareStop := flag.Bool("prepare-stop", false, "atomically refuse new sessions when the daemon is idle")
 	flag.Parse()
@@ -65,7 +66,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	backend, err := daemoncontrol.NewTunnelBackend(*binaryPath)
+	backend, err := daemoncontrol.NewTunnelBackendWithRoutePlanRuntime(*binaryPath, *allowRoutePlans)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)

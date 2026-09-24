@@ -6,6 +6,7 @@ package daemoncontrol
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"os"
@@ -22,8 +23,83 @@ var syntheticPhysicalProbe = netip.MustParseAddr("203.0.113.254")
 type PhysicalEndpointRoute struct {
 	target, gateway netip.Addr
 	prefix          netip.Prefix
+	basePrefix      netip.Prefix
 	iface           *net.Interface
 	routeSet        bool
+}
+
+// configurePlannedPhysicalEndpointRoute records the endpoint's pre-existing
+// physical route and proves it remains in the RIB after installing the owned host route.
+func configurePlannedPhysicalEndpointRoute(target netip.Addr) (*PhysicalEndpointRoute, error) {
+	if os.Geteuid() != 0 || !target.Is4() || !target.IsGlobalUnicast() {
+		return nil, errors.New("planned endpoint route requires IPv4 root")
+	}
+	configured := &PhysicalEndpointRoute{target: target}
+	existing, err := configured.lookup()
+	if err != nil || existing.Err != nil {
+		return nil, fmt.Errorf("planned endpoint preflight-get: %w", errors.Join(err, existing.Err))
+	}
+	if configured.isTargetHostRoute(existing) {
+		return nil, errors.New("planned endpoint preflight-host-collision")
+	}
+	configured.gateway, configured.iface, err = physicalGateway(existing)
+	if err != nil {
+		return nil, fmt.Errorf("planned endpoint preflight-metadata: %w", errors.Join(err, errors.New("effective endpoint route unavailable")))
+	}
+	configured.basePrefix, err = configured.findBaseRoute(target)
+	if err != nil {
+		return nil, fmt.Errorf("planned endpoint preflight-rib: %w", err)
+	}
+	if err := configured.add(); err != nil {
+		return configured.cleanupFailedRouteAdd(fmt.Errorf("planned endpoint add: %w", err))
+	}
+	if err := configured.verify(); err != nil || !configured.baseRouteInRIB() {
+		return configured.cleanupFailedRouteAdd(fmt.Errorf("planned endpoint verify-base-rib: %w", errors.Join(err, errors.New("effective endpoint route changed"))))
+	}
+	return configured, nil
+}
+
+func (configured *PhysicalEndpointRoute) findBaseRoute(target netip.Addr) (netip.Prefix, error) {
+	rib, err := route.FetchRIB(syscall.AF_INET, route.RIBTypeRoute, 0)
+	if err != nil {
+		return netip.Prefix{}, err
+	}
+	messages, err := route.ParseRIB(route.RIBTypeRoute, rib)
+	if err != nil {
+		return netip.Prefix{}, err
+	}
+	return selectBaseRoute(messages, target, configured.gateway, configured.iface)
+}
+
+func selectBaseRoute(messages []route.Message, target, gateway netip.Addr, iface *net.Interface) (netip.Prefix, error) {
+	return selectBaseRouteWithInterfaceByIndex(messages, target, gateway, iface, net.InterfaceByIndex)
+}
+
+func selectBaseRouteWithInterfaceByIndex(messages []route.Message, target, gateway netip.Addr, iface *net.Interface, interfaceByIndex func(int) (*net.Interface, error)) (netip.Prefix, error) {
+	var selected netip.Prefix
+	for _, parsed := range messages {
+		message, ok := parsed.(*route.RouteMessage)
+		if !ok {
+			continue
+		}
+		prefix, ok := routePrefix(message)
+		if !ok || !prefix.Contains(target) {
+			continue
+		}
+		if !matchesRIBPhysicalRoute(message, gateway, iface, interfaceByIndex) {
+			continue
+		}
+		if selected.IsValid() && selected.Bits() == prefix.Bits() {
+			return netip.Prefix{}, errors.New("ambiguous base route")
+		}
+		if !selected.IsValid() || prefix.Bits() > selected.Bits() {
+			selected = prefix
+		}
+	}
+	if !selected.IsValid() {
+		return netip.Prefix{}, errors.New("base route unavailable")
+	}
+	return selected, nil
 }
 
 func configureSyntheticPhysicalEndpointRoute(targetText string) (*PhysicalEndpointRoute, error) {
@@ -199,6 +275,57 @@ func (configured *PhysicalEndpointRoute) validatePhysicalGateway() error {
 
 func (configured *PhysicalEndpointRoute) matchesPhysicalGateway(gateway netip.Addr, iface *net.Interface) bool {
 	return iface != nil && gateway == configured.gateway && iface.Index == configured.iface.Index && iface.Name == configured.iface.Name
+}
+
+func (configured *PhysicalEndpointRoute) baseRouteInRIB() bool {
+	rib, err := route.FetchRIB(syscall.AF_INET, route.RIBTypeRoute, 0)
+	if err != nil {
+		return false
+	}
+	messages, err := route.ParseRIB(route.RIBTypeRoute, rib)
+	if err != nil {
+		return false
+	}
+	for _, parsed := range messages {
+		message, ok := parsed.(*route.RouteMessage)
+		if !ok {
+			continue
+		}
+		if configured.matchesBaseRoute(message) {
+			return true
+		}
+	}
+	return false
+}
+
+func (configured *PhysicalEndpointRoute) matchesBaseRoute(message *route.RouteMessage) bool {
+	return configured.matchesBaseRouteWithInterfaceByIndex(message, net.InterfaceByIndex)
+}
+
+func (configured *PhysicalEndpointRoute) matchesBaseRouteWithInterfaceByIndex(message *route.RouteMessage, interfaceByIndex func(int) (*net.Interface, error)) bool {
+	prefix, ok := routePrefix(message)
+	return ok && prefix == configured.basePrefix && matchesRIBPhysicalRoute(message, configured.gateway, configured.iface, interfaceByIndex)
+}
+
+// matchesRIBPhysicalRoute accepts complete RIB metadata, or Darwin's observed
+// nil RTAX_IFP form only after resolving the recorded physical interface again.
+func matchesRIBPhysicalRoute(message *route.RouteMessage, gateway netip.Addr, iface *net.Interface, interfaceByIndex func(int) (*net.Interface, error)) bool {
+	if message == nil {
+		return false
+	}
+	if routeAddress(message, syscall.RTAX_IFP) != nil {
+		actualGateway, index, name, err := physicalRouteMetadata(message)
+		return err == nil && actualGateway == gateway && iface != nil && index == iface.Index && name == iface.Name
+	}
+	if iface == nil || interfaceByIndex == nil || message.Index <= 0 || message.Index != iface.Index || message.Flags&(syscall.RTF_UP|syscall.RTF_GATEWAY) != syscall.RTF_UP|syscall.RTF_GATEWAY {
+		return false
+	}
+	actualGateway, gatewayOK := routeAddress(message, syscall.RTAX_GATEWAY).(*route.Inet4Addr)
+	if !gatewayOK || netip.AddrFrom4(actualGateway.IP) != gateway {
+		return false
+	}
+	actualInterface, err := interfaceByIndex(message.Index)
+	return err == nil && actualInterface != nil && actualInterface.Index == iface.Index && actualInterface.Name == iface.Name && actualInterface.Flags&net.FlagLoopback == 0 && !utunName.MatchString(actualInterface.Name)
 }
 
 func (configured *PhysicalEndpointRoute) routeAddrs() []route.Addr {

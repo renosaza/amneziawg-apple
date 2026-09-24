@@ -27,7 +27,13 @@ func (memoryBackend) Stop(Session) error            { return nil }
 func (memoryBackend) Status(Session) error          { return nil }
 
 func NewTunnelBackend(binary string) (Backend, error) {
-	return newTunnelBackend(binary)
+	return NewTunnelBackendWithRoutePlanRuntime(binary, false)
+}
+
+// NewTunnelBackendWithRoutePlanRuntime is for a root-controlled daemon flag;
+// IPC cannot enable route-plan mutation.
+func NewTunnelBackendWithRoutePlanRuntime(binary string, allowRoutePlans bool) (Backend, error) {
+	return newTunnelBackendWithRoutePlanRuntime(binary, allowRoutePlans)
 }
 
 var errBackendUnavailable = errors.New("real tunnel backend is unavailable on this platform")
