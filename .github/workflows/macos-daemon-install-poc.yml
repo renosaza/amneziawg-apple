@@ -16,7 +16,7 @@ jobs:
         with:
           go-version-file: scripts/daemon-control/go.mod
           cache-dependency-path: scripts/daemon-control/go.sum
-      - name: Install, start one TEST-NET route plan, and uninstall the synthetic daemon
+      - name: Install, exercise two TEST-NET route plans, and uninstall the synthetic daemon
         shell: bash
         run: |
           set -euo pipefail
@@ -42,19 +42,31 @@ jobs:
               echo "cleanup left the LaunchDaemon loaded" >&2
               failed=1
             fi
-            if ! target_interface=$(route -n get 198.51.100.20 | awk '/interface:/{print $2; exit}'); then
-              echo "cleanup could not inspect TEST-NET split route" >&2
-              failed=1
-            fi
-            if ! endpoint_destination=$(route -n get 198.51.100.10 | awk '/destination:/{print $2; exit}'); then
-              echo "cleanup could not inspect TEST-NET endpoint route" >&2
-              failed=1
-            fi
-            case "$target_interface" in utun[0-9]*) echo "cleanup left TEST-NET split route on $target_interface" >&2; failed=1 ;; esac
-            if [[ $endpoint_destination == 198.51.100.10 ]]; then
-              echo "cleanup left TEST-NET endpoint host route" >&2
-              failed=1
-            fi
+            for target in 198.51.100.20 203.0.113.20; do
+              if ! target_interface=$(route -n get "$target" | awk '/interface:/{print $2; exit}'); then
+                echo "cleanup could not inspect TEST-NET split route $target" >&2
+                failed=1
+              fi
+              if [[ -z $target_interface ]]; then
+                echo "cleanup could not determine TEST-NET split route interface $target" >&2
+                failed=1
+              fi
+              case "$target_interface" in utun[0-9]*) echo "cleanup left TEST-NET split route $target on $target_interface" >&2; failed=1 ;; esac
+            done
+            for endpoint in 198.51.100.10 203.0.113.10; do
+              if ! endpoint_destination=$(route -n get "$endpoint" | awk '/destination:/{print $2; exit}'); then
+                echo "cleanup could not inspect TEST-NET endpoint route $endpoint" >&2
+                failed=1
+              fi
+              if [[ -z $endpoint_destination ]]; then
+                echo "cleanup could not determine TEST-NET endpoint route destination $endpoint" >&2
+                failed=1
+              fi
+              if [[ $endpoint_destination == "$endpoint" ]]; then
+                echo "cleanup left TEST-NET endpoint host route $endpoint" >&2
+                failed=1
+              fi
+            done
             return "$failed"
           }
           cleanup() {
@@ -62,6 +74,11 @@ jobs:
             trap - EXIT
             set +e
             if [[ -S "$socket" ]]; then
+              sudo -u "#$uid" "$GITHUB_WORKSPACE/out/amneziawg-daemon-control-poc" \
+                -manual-route-plan-stop-two -socket "$socket"
+              if [[ $? -ne 0 ]]; then
+                echo "cleanup could not stop the second synthetic route-plan session" >&2
+              fi
               sudo -u "#$uid" "$GITHUB_WORKSPACE/out/amneziawg-daemon-control-poc" \
                 -manual-route-plan-stop -socket "$socket"
               if [[ $? -ne 0 ]]; then
@@ -94,12 +111,23 @@ jobs:
             --allow-route-plan-runtime
           sudo -u "#$uid" "$GITHUB_WORKSPACE/out/amneziawg-daemon-control-poc" \
             -manual-route-plan-start -socket "$socket"
-          target_interface=$(route -n get 198.51.100.20 | awk '/interface:/{print $2; exit}')
-          endpoint_interface=$(route -n get 198.51.100.10 | awk '/interface:/{print $2; exit}')
-          case "$target_interface" in utun[0-9]*) ;; *) exit 1 ;; esac
-          case "$endpoint_interface" in ""|utun[0-9]*) exit 1 ;; esac
+          sudo -u "#$uid" "$GITHUB_WORKSPACE/out/amneziawg-daemon-control-poc" \
+            -manual-route-plan-start-two -socket "$socket"
+          first_interface=$(route -n get 198.51.100.20 | awk '/interface:/{print $2; exit}')
+          second_interface=$(route -n get 203.0.113.20 | awk '/interface:/{print $2; exit}')
+          first_endpoint_interface=$(route -n get 198.51.100.10 | awk '/interface:/{print $2; exit}')
+          second_endpoint_interface=$(route -n get 203.0.113.10 | awk '/interface:/{print $2; exit}')
+          case "$first_interface" in utun[0-9]*) ;; *) exit 1 ;; esac
+          case "$second_interface" in utun[0-9]*) ;; *) exit 1 ;; esac
+          [[ $first_interface != "$second_interface" ]]
+          case "$first_endpoint_interface" in ""|utun[0-9]*) exit 1 ;; esac
+          case "$second_endpoint_interface" in ""|utun[0-9]*) exit 1 ;; esac
           sudo -u "#$uid" "$GITHUB_WORKSPACE/out/amneziawg-daemon-control-poc" \
             -manual-route-plan-stop -socket "$socket"
+          surviving_interface=$(route -n get 203.0.113.20 | awk '/interface:/{print $2; exit}')
+          [[ $surviving_interface == "$second_interface" ]]
+          sudo -u "#$uid" "$GITHUB_WORKSPACE/out/amneziawg-daemon-control-poc" \
+            -manual-route-plan-stop-two -socket "$socket"
           sudo "$GITHUB_WORKSPACE/scripts/install-daemon-control-poc.sh" uninstall --uid "$uid"
           trap - EXIT
           verify_absent
