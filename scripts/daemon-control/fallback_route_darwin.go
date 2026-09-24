@@ -53,6 +53,9 @@ func configureSplitRoute(process *tunnelProcess, prefix netip.Prefix, synthetic 
 		return nil, err
 	}
 	configured := &SyntheticFallbackRoute{name: process.name, prefix: prefix, iface: iface}
+	if !synthetic && configured.hasForeignMoreSpecificRoute() {
+		return nil, errors.New("refusing a split route shadowed in the RIB")
+	}
 	existing, err := configured.lookup()
 	if err != nil || existing.Err != nil {
 		return nil, errors.Join(err, existing.Err)
@@ -70,6 +73,25 @@ func configureSplitRoute(process *tunnelProcess, prefix netip.Prefix, synthetic 
 		return configured.cleanupFailedRouteAdd(err)
 	}
 	return configured, nil
+}
+
+func (configured *SyntheticFallbackRoute) hasForeignMoreSpecificRoute() bool {
+	rib, err := route.FetchRIB(syscall.AF_INET, route.RIBTypeRoute, 0)
+	if err != nil {
+		return true
+	}
+	messages, err := route.ParseRIB(route.RIBTypeRoute, rib)
+	if err != nil {
+		return true
+	}
+	for _, parsed := range messages {
+		message, ok := parsed.(*route.RouteMessage)
+		prefix, ok := routePrefix(message)
+		if ok && message.Flags&syscall.RTF_UP != 0 && configured.prefix.Contains(prefix.Addr()) && prefix.Bits() > configured.prefix.Bits() {
+			return true
+		}
+	}
+	return false
 }
 
 func (configured *SyntheticFallbackRoute) add() error { return configured.write(syscall.RTM_ADD) }

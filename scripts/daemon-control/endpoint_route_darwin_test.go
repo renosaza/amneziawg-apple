@@ -114,6 +114,16 @@ func TestPlannedEndpointBaseRouteIdentity(t *testing.T) {
 	if configured.matchesBaseRoute(message) {
 		t.Fatal("accepted changed base route")
 	}
+	message.Index = 7
+	message.Addrs[syscall.RTAX_IFP] = &route.LinkAddr{Index: 8, Name: "en1"}
+	if configured.matchesBaseRoute(message) {
+		t.Fatal("accepted changed interface metadata")
+	}
+	message.Addrs[syscall.RTAX_IFP] = &route.LinkAddr{Index: 7, Name: "en0"}
+	message.Flags &^= syscall.RTF_GATEWAY
+	if configured.matchesBaseRoute(message) {
+		t.Fatal("accepted non-gateway base route")
+	}
 }
 
 func TestSyntheticPhysicalEndpointRejectsChangedGateway(t *testing.T) {

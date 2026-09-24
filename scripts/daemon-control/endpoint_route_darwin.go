@@ -251,7 +251,8 @@ func (configured *PhysicalEndpointRoute) baseRouteInRIB() bool {
 func (configured *PhysicalEndpointRoute) matchesBaseRoute(message *route.RouteMessage) bool {
 	prefix, ok := routePrefix(message)
 	gateway, gatewayOK := routeAddress(message, syscall.RTAX_GATEWAY).(*route.Inet4Addr)
-	return ok && gatewayOK && prefix == configured.basePrefix && message.Index == configured.iface.Index && gateway.IP == configured.gateway.As4()
+	interfaceAddress, interfaceOK := routeAddress(message, syscall.RTAX_IFP).(*route.LinkAddr)
+	return ok && gatewayOK && interfaceOK && message.Flags&(syscall.RTF_UP|syscall.RTF_GATEWAY) == syscall.RTF_UP|syscall.RTF_GATEWAY && !utunName.MatchString(interfaceAddress.Name) && interfaceAddress.Index == configured.iface.Index && interfaceAddress.Name == configured.iface.Name && prefix == configured.basePrefix && message.Index == configured.iface.Index && gateway.IP == configured.gateway.As4()
 }
 
 func (configured *PhysicalEndpointRoute) routeAddrs() []route.Addr {
