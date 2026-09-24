@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net"
 	"net/netip"
@@ -10,6 +11,32 @@ import (
 	"path/filepath"
 	"testing"
 )
+
+func TestBoundedDiagnosticLogRotates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "diagnostics.jsonl")
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Write(bytes.Repeat([]byte("x"), int(diagnosticLogLimit))); err != nil {
+		t.Fatal(err)
+	}
+	logger := &boundedDiagnosticLog{file: file, size: diagnosticLogLimit}
+	if _, err := logger.Write([]byte("event\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := logger.Close(); err != nil {
+		t.Fatal(err)
+	}
+	previous, err := os.ReadFile(path + ".1")
+	if err != nil || len(previous) != int(diagnosticLogLimit) {
+		t.Fatalf("previous diagnostic log = %d bytes, %v", len(previous), err)
+	}
+	current, err := os.ReadFile(path)
+	if err != nil || string(current) != "event\n" {
+		t.Fatalf("current diagnostic log = %q, %v", current, err)
+	}
+}
 
 func shortSocketPath(t *testing.T) string {
 	t.Helper()
