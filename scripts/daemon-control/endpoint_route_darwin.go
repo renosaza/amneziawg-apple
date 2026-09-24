@@ -34,6 +34,36 @@ type physicalBaseRoute struct {
 	iface   *net.Interface
 }
 
+const (
+	physicalEndpointStageEffectiveLookup = "physical_endpoint_effective_lookup"
+	physicalEndpointStageRIBSelection    = "physical_endpoint_rib_selection"
+	physicalEndpointStageRTMAdd          = "physical_endpoint_rtm_add"
+	physicalEndpointStageVerifyHost      = "physical_endpoint_verify_host"
+	physicalEndpointStageVerifyBaseRIB   = "physical_endpoint_verify_base_rib"
+)
+
+// physicalEndpointRouteFailure carries a fixed diagnostic stage while keeping
+// the original error available to existing cleanup and error propagation.
+type physicalEndpointRouteFailure struct {
+	stage string
+	err   error
+}
+
+func (failure *physicalEndpointRouteFailure) Error() string { return failure.err.Error() }
+func (failure *physicalEndpointRouteFailure) Unwrap() error { return failure.err }
+
+func failedPhysicalEndpointRoute(stage string, err error) error {
+	return &physicalEndpointRouteFailure{stage: stage, err: err}
+}
+
+func physicalEndpointRouteDiagnostic(err error) (string, string, bool) {
+	var failure *physicalEndpointRouteFailure
+	if !errors.As(err, &failure) {
+		return "", "", false
+	}
+	return failure.stage, physicalEndpointDiagnosticCode(err), true
+}
+
 // configurePlannedPhysicalEndpointRoute records the endpoint's pre-existing
 // physical route and proves it remains in the RIB after installing the owned host route.
 func configurePlannedPhysicalEndpointRoute(target netip.Addr) (*PhysicalEndpointRoute, error) {
@@ -42,22 +72,31 @@ func configurePlannedPhysicalEndpointRoute(target netip.Addr) (*PhysicalEndpoint
 	}
 	configured := &PhysicalEndpointRoute{target: target}
 	existing, err := configured.lookup()
-	if err != nil || existing.Err != nil {
-		return nil, fmt.Errorf("planned endpoint preflight-get: %w", errors.Join(err, existing.Err))
+	if err != nil || existing == nil || existing.Err != nil {
+		var routeErr error
+		if existing != nil {
+			routeErr = existing.Err
+		} else {
+			routeErr = errors.New("planned endpoint preflight-get returned no route")
+		}
+		return nil, failedPhysicalEndpointRoute(physicalEndpointStageEffectiveLookup, fmt.Errorf("planned endpoint preflight-get: %w", errors.Join(err, routeErr)))
 	}
 	if configured.isTargetHostRoute(existing) {
-		return nil, errors.New("planned endpoint preflight-host-collision")
+		return nil, failedPhysicalEndpointRoute(physicalEndpointStageEffectiveLookup, errors.New("planned endpoint preflight-host-collision"))
 	}
 	base, err := configured.findBaseRoute(target)
 	if err != nil {
-		return nil, fmt.Errorf("planned endpoint preflight-rib: %w", err)
+		return nil, failedPhysicalEndpointRoute(physicalEndpointStageRIBSelection, fmt.Errorf("planned endpoint preflight-rib: %w", err))
 	}
 	configured.basePrefix, configured.gateway, configured.iface = base.prefix, base.gateway, base.iface
 	if err := configured.add(); err != nil {
-		return configured.cleanupFailedRouteAdd(fmt.Errorf("planned endpoint add: %w", err))
+		return configured.cleanupFailedRouteAdd(failedPhysicalEndpointRoute(physicalEndpointStageRTMAdd, fmt.Errorf("planned endpoint add: %w", err)))
 	}
-	if err := configured.verify(); err != nil || !configured.baseRouteInRIB() {
-		return configured.cleanupFailedRouteAdd(fmt.Errorf("planned endpoint verify-base-rib: %w", errors.Join(err, errors.New("effective endpoint route changed"))))
+	if err := configured.verify(); err != nil {
+		return configured.cleanupFailedRouteAdd(failedPhysicalEndpointRoute(physicalEndpointStageVerifyHost, fmt.Errorf("planned endpoint verify-host: %w", err)))
+	}
+	if !configured.baseRouteInRIB() {
+		return configured.cleanupFailedRouteAdd(failedPhysicalEndpointRoute(physicalEndpointStageVerifyBaseRIB, errors.New("effective endpoint route changed")))
 	}
 	return configured, nil
 }

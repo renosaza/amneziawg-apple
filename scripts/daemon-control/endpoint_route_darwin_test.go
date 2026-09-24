@@ -5,13 +5,59 @@
 package daemoncontrol
 
 import (
+	"bytes"
+	"errors"
 	"net"
 	"net/netip"
+	"strings"
 	"syscall"
 	"testing"
 
 	"golang.org/x/net/route"
 )
+
+func TestPhysicalEndpointDiagnosticsUseFixedStagesAndBoundedErrnos(t *testing.T) {
+	for _, test := range []struct {
+		err  error
+		code string
+	}{
+		{syscall.EEXIST, "eexist"},
+		{syscall.EINVAL, "einval"},
+		{syscall.ENETUNREACH, "enetunreach"},
+		{syscall.EADDRNOTAVAIL, "eaddrnotavail"},
+		{syscall.EPERM, "permission_denied"},
+		{syscall.ENODEV, "enodev"},
+		{errors.New("PRIVATE_KEY_MARKER unclassified"), "unknown"},
+	} {
+		stage, code, ok := physicalEndpointRouteDiagnostic(failedPhysicalEndpointRoute(physicalEndpointStageRTMAdd, test.err))
+		if !ok || stage != physicalEndpointStageRTMAdd || code != test.code {
+			t.Fatalf("stage=%q code=%q ok=%t for %v", stage, code, ok, test.err)
+		}
+	}
+	if _, _, ok := physicalEndpointRouteDiagnostic(errors.New("unwrapped")); ok {
+		t.Fatal("classified an unwrapped route error")
+	}
+}
+
+func TestPhysicalEndpointDiagnosticDoesNotLogErrorText(t *testing.T) {
+	var output bytes.Buffer
+	err := failedPhysicalEndpointRoute(physicalEndpointStageVerifyHost, errors.New("PRIVATE_KEY_MARKER raw route error"))
+	stage, code, ok := physicalEndpointRouteDiagnostic(err)
+	if !ok {
+		t.Fatal("did not classify staged route error")
+	}
+	NewDiagnostics(&output, false).Event(DiagnosticEvent{
+		Event: "route", Stage: stage, Class: "physical_endpoint_route_failure", Code: code,
+		RouteOwner: "physical_endpoint", Result: "failed",
+	})
+	logged := output.String()
+	if strings.Contains(logged, "PRIVATE_KEY_MARKER") {
+		t.Fatalf("diagnostics leaked route error text: %q", logged)
+	}
+	if !strings.Contains(logged, `"stage":"physical_endpoint_verify_host"`) || !strings.Contains(logged, `"code":"unknown"`) {
+		t.Fatalf("diagnostics omitted route failure classification: %q", logged)
+	}
+}
 
 func TestSyntheticPhysicalEndpointValidation(t *testing.T) {
 	if _, err := syntheticEndpoint("203.0.113.10"); err != nil {
