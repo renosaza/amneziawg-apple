@@ -47,6 +47,18 @@ jobs:
             xcodebuild -project WireGuard.xcodeproj -target "$target" -configuration Debug -sdk macosx SYMROOT="$build_products" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
           done
           scripts/test-unsigned-daemon-gui-startup.sh "$build_products/Debug/AmneziaWG.app"
+      - name: Build unsigned macOS daemon package
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/package-unsigned-macos-daemon.sh "$RUNNER_TEMP/unsigned-macos-package"
+          scripts/test-unsigned-macos-package.sh "$RUNNER_TEMP"/unsigned-macos-package/AmneziaWG-unsigned-macos-*.zip
+      - name: Upload unsigned macOS daemon package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: unsigned-macos-daemon-package
+          path: ${{ runner.temp }}/unsigned-macos-package/AmneziaWG-unsigned-macos-*.zip
+          if-no-files-found: error
       - name: Run all SwiftPM WireGuardKit tests
         shell: bash
         run: |
