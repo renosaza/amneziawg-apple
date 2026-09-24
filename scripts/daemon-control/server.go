@@ -163,7 +163,7 @@ func (server *Server) apply(request request) response {
 		if err := validRoutePlanMatchesConfig(request.RoutePlan, request.Config); err != nil {
 			return response{Error: "invalid_request"}
 		}
-		session, err := server.backend.Start(request.Config)
+		session, err := server.start(request)
 		if err != nil {
 			if session.value != nil {
 				server.profiles[request.ProfileID] = session
@@ -194,6 +194,21 @@ func (server *Server) apply(request request) response {
 	default:
 		return response{Error: "invalid_request"}
 	}
+}
+
+func (server *Server) start(request request) (Session, error) {
+	if request.RoutePlan == nil {
+		return server.backend.Start(request.Config)
+	}
+	backend, ok := server.backend.(routePlanBackend)
+	if !ok {
+		return server.backend.Start(request.Config)
+	}
+	var plan routePlan
+	if err := json.Unmarshal(request.RoutePlan, &plan); err != nil {
+		return Session{}, err
+	}
+	return backend.StartWithRoutePlan(request.Config, plan)
 }
 
 // Close prevents new operations and stops every child owned by this server.

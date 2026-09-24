@@ -6,6 +6,7 @@ package daemoncontrol
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -41,6 +42,7 @@ type tunnelBackend struct {
 	syntheticIPv4Routes     bool
 	syntheticEndpointRoutes bool
 	syntheticFallbackRoute  bool
+	allowRoutePlanRuntime   bool
 	routesMu                sync.Mutex
 	routeSlots              [len(syntheticIPv4RouteSpecs)]bool
 	lastStartStage          string
@@ -93,6 +95,28 @@ func trustedBinary(path string) bool {
 }
 
 func (backend *tunnelBackend) Start(config string) (Session, error) {
+	return backend.start(config, nil)
+}
+
+func (backend *tunnelBackend) StartWithRoutePlan(config string, plan routePlan) (Session, error) {
+	if !backend.allowRoutePlanRuntime || !isManualRoutePlan(plan) {
+		return Session{}, errors.New("route plan runtime unavailable")
+	}
+	return backend.start(config, &plan)
+}
+
+func isManualRoutePlan(plan routePlan) bool {
+	if plan.LocalAddress != "192.0.2.1/32" {
+		return false
+	}
+	var routes []routePlanRoute
+	if json.Unmarshal(plan.Routes, &routes) != nil || len(routes) != 2 {
+		return false
+	}
+	return routes[0].Destination == "198.51.100.0/24" && routes[0].Owner == "tunnel" && routes[1].Destination == "198.51.100.10/32" && routes[1].Owner == "physicalEndpoint"
+}
+
+func (backend *tunnelBackend) start(config string, plan *routePlan) (Session, error) {
 	backend.lastStartStage = "utun"
 	baseline, err := currentUtuns()
 	if err != nil {
