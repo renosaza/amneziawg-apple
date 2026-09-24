@@ -43,7 +43,7 @@ func TestManualRoutePlanStartAndCleanup(t *testing.T) {
 	}
 	started := exchange(t, server, 501, requestFrame(t, string(frame)))
 	if !started.OK {
-		t.Fatalf("route-plan start: %#v", started)
+		t.Fatalf("route-plan start stage=%s: %#v", backend.(*tunnelBackend).lastStartStage, started)
 	}
 	process := server.profiles[profileID].value.(*tunnelProcess)
 	if process.route == nil || process.fallbackRoute == nil || process.precedenceEndpointRoute == nil {
