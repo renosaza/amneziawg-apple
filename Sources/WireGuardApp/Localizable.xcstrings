@@ -20925,7 +20925,7 @@
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Отключен"
+            "value" : "Отключить"
           }
         },
         "sl" : {
@@ -21250,6 +21250,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重新啟用中..."
+          }
+        }
+      }
+    },
+    "macToggleStatusButtonRefreshStatus" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh Status"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Обновить статус"
           }
         }
       }

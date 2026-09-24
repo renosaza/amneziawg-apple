@@ -12,6 +12,15 @@ class ButtonRow: NSView {
         return button
     }()
 
+    let secondaryButton: NSButton = {
+        let button = NSButton()
+        button.title = ""
+        button.setButtonType(.momentaryPushIn)
+        button.bezelStyle = .rounded
+        button.isHidden = true
+        return button
+    }()
+
     var buttonTitle: String {
         get { return button.title }
         set(value) { button.title = value }
@@ -22,12 +31,28 @@ class ButtonRow: NSView {
         set(value) { button.isEnabled = value }
     }
 
+    var secondaryButtonTitle: String {
+        get { return secondaryButton.title }
+        set(value) { secondaryButton.title = value }
+    }
+
+    var isSecondaryButtonEnabled: Bool {
+        get { return secondaryButton.isEnabled }
+        set(value) { secondaryButton.isEnabled = value }
+    }
+
+    var isSecondaryButtonHidden: Bool {
+        get { return secondaryButton.isHidden }
+        set(value) { secondaryButton.isHidden = value }
+    }
+
     var buttonToolTip: String {
         get { return button.toolTip ?? "" }
         set(value) { button.toolTip = value }
     }
 
     var onButtonClicked: (() -> Void)?
+    var onSecondaryButtonClicked: (() -> Void)?
     var statusObservationToken: AnyObject?
     var isOnDemandEnabledObservationToken: AnyObject?
     var hasOnDemandRulesObservationToken: AnyObject?
@@ -41,14 +66,21 @@ class ButtonRow: NSView {
 
         button.target = self
         button.action = #selector(buttonClicked)
+        secondaryButton.target = self
+        secondaryButton.action = #selector(secondaryButtonClicked)
 
         addSubview(button)
+        addSubview(secondaryButton)
         button.translatesAutoresizingMaskIntoConstraints = false
+        secondaryButton.translatesAutoresizingMaskIntoConstraints = false
 
         NSLayoutConstraint.activate([
             button.centerYAnchor.constraint(equalTo: self.centerYAnchor),
             button.leadingAnchor.constraint(equalTo: self.leadingAnchor, constant: 155),
-            button.widthAnchor.constraint(greaterThanOrEqualToConstant: 100)
+            button.widthAnchor.constraint(greaterThanOrEqualToConstant: 100),
+            secondaryButton.centerYAnchor.constraint(equalTo: self.centerYAnchor),
+            secondaryButton.leadingAnchor.constraint(equalTo: button.trailingAnchor, constant: 8),
+            secondaryButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 100)
         ])
     }
 
@@ -60,10 +92,17 @@ class ButtonRow: NSView {
         onButtonClicked?()
     }
 
+    @objc func secondaryButtonClicked() {
+        onSecondaryButtonClicked?()
+    }
+
     override func prepareForReuse() {
         buttonTitle = ""
+        secondaryButtonTitle = ""
+        isSecondaryButtonHidden = true
         buttonToolTip = ""
         onButtonClicked = nil
+        onSecondaryButtonClicked = nil
         statusObservationToken = nil
         isOnDemandEnabledObservationToken = nil
         hasOnDemandRulesObservationToken = nil

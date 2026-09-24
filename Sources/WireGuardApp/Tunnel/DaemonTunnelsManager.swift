@@ -491,10 +491,15 @@ final class DaemonTunnelsManager: TunnelsManager {
     }
 
     override func refreshStatuses() {
+        let knownProfileIDs = Set(tunnels.compactMap(\.daemonProfileID))
         mutationQueue.async { [weak self] in
+            guard let self else { return }
             let result = Result { try DaemonControlClient(socketPath: Self.controlSocketPath).list() }
+            if case .success(let statuses) = result,
+               Set(statuses.map(\.id)).isSubset(of: knownProfileIDs) {
+                self.uncertainDaemonProfileIDs.formIntersection(statuses.map(\.id))
+            }
             DispatchQueue.main.async {
-                guard let self else { return }
                 switch result {
                 case .success(let statuses):
                     self.applyDaemonStatuses(statuses)
