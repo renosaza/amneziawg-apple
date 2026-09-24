@@ -47,9 +47,12 @@ are unchanged.
 
 ## Consequences
 
-This is a client lifecycle slice only. It applies no native route, address,
-DNS, PF, gateway, or interface configuration and it does not make the existing
-synthetic, runtime-gated route-plan POC (Decision 0016) a general VPN backend. It
-accepts only the synthetic manual-runtime scenario, so ordinary stored profiles remain
-unavailable. This GUI patch must remain a draft until an installed, separately reviewed
-native backend accepts the same constrained contract.
+This is a client lifecycle slice. Native address and route mutation remains solely
+with the separately installed, root-controlled daemon backend. That backend is opt-in
+default-off and validates the same one-peer, one global-unicast IPv4 endpoint, one
+`/2` through `/32` IPv4 tunnel route, one local `/32`, and one physical endpoint `/32`
+contract before it creates a `utun` or applies route state. DNS, PF, gateways,
+concurrent profiles, on-demand, and release delivery remain outside this decision.
+
+The GUI patch remains a draft until integrated review approves the combined client and
+installed-backend path. Decision 0016 remains the older synthetic runtime POC.

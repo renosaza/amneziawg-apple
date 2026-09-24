@@ -72,7 +72,8 @@ public struct MacOSDaemonRoutePlan: Codable, Equatable {
               peer.allowedIPs[0].address is IPv4Address,
               (2 ... 32).contains(peer.allowedIPs[0].networkPrefixLength),
               let endpoint = peer.endpoint,
-              case .ipv4 = endpoint.host
+              case .ipv4(let endpointAddress) = endpoint.host,
+              isUsableIPv4Address(endpointAddress)
         else {
             return .failure(.unsupportedConfiguration)
         }
@@ -132,6 +133,10 @@ public struct MacOSDaemonRoutePlan: Codable, Equatable {
     }
 
     private static func isUsableLocalIPv4Address(_ address: IPv4Address) -> Bool {
+        isUsableIPv4Address(address)
+    }
+
+    private static func isUsableIPv4Address(_ address: IPv4Address) -> Bool {
         let bytes = address.rawValue
         return bytes[0] != 0 && bytes[0] < 224 && bytes[0] != 127 &&
             !(bytes[0] == 169 && bytes[1] == 254)

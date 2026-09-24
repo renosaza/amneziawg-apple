@@ -91,6 +91,7 @@ final class MacOSDaemonRoutePlanTests: XCTestCase {
             configuration(allowed: ["128.0.0.0/1"], endpoint: endpoint),
             configuration(allowed: ["2001:db8::/64"], endpoint: endpoint),
             configuration(allowed: ["10.25.0.0/24"], endpoint: hostname),
+            configuration(allowed: ["10.25.0.0/24"], endpoint: Endpoint(from: "127.0.0.1:51820")!),
             configuration(allowed: ["10.25.0.0/24"], endpoint: endpoint, address: ["2001:db8::2/64"]),
             dnsConfiguration,
             excludedConfiguration,
