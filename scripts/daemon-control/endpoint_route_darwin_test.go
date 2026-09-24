@@ -257,6 +257,17 @@ func TestSelectPhysicalBaseRouteFailsClosed(t *testing.T) {
 	if _, err := selectPhysicalBaseRouteWithInterfaceByIndex([]route.Message{defaultRoute, hostRoute}, target, lookup); err == nil {
 		t.Fatal("accepted a foreign endpoint host route")
 	}
+	utunHost := physicalRouteMessage(9, syscall.RTF_UP|syscall.RTF_HOST|syscall.RTF_GATEWAY, target.As4(), [4]byte{10, 0, 0, 1}, "utun9")
+	utunHost.Addrs[syscall.RTAX_NETMASK] = &route.Inet4Addr{IP: [4]byte{255, 255, 255, 255}}
+	utunLookup := func(index int) (*net.Interface, error) {
+		if index == 9 {
+			return &net.Interface{Index: 9, Name: "utun9"}, nil
+		}
+		return lookup(index)
+	}
+	if _, err := selectPhysicalBaseRouteWithInterfaceByIndex([]route.Message{defaultRoute, utunHost}, target, utunLookup); err == nil {
+		t.Fatal("accepted an endpoint host route through utun")
+	}
 	duplicate := physical([4]byte{}, [4]byte{})
 	if _, err := selectPhysicalBaseRouteWithInterfaceByIndex([]route.Message{defaultRoute, duplicate}, target, lookup); err == nil {
 		t.Fatal("accepted ambiguous equal physical routes")
@@ -270,6 +281,12 @@ func TestSelectPhysicalBaseRouteFailsClosed(t *testing.T) {
 	incompletePrefix.Addrs[syscall.RTAX_GATEWAY] = nil
 	if _, err := selectPhysicalBaseRouteWithInterfaceByIndex([]route.Message{defaultRoute, incompletePrefix}, target, lookup); err == nil {
 		t.Fatal("used a less-specific physical route after an incomplete physical candidate")
+	}
+	staleIFP := physical([4]byte{}, [4]byte{})
+	if _, _, err := physicalRIBRouteMetadata(staleIFP, func(int) (*net.Interface, error) {
+		return &net.Interface{Index: 7, Name: "utun7"}, nil
+	}); err == nil {
+		t.Fatal("accepted RTAX_IFP metadata after the live interface became utun")
 	}
 }
 

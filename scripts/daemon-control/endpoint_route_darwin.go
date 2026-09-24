@@ -75,8 +75,9 @@ func (configured *PhysicalEndpointRoute) findBaseRoute(target netip.Addr) (physi
 }
 
 // selectPhysicalBaseRoute chooses the most-specific physical RIB route for a
-// planned endpoint. An existing tunnel route may be the effective route, so it
-// is deliberately ignored here; a foreign endpoint host route is not.
+// planned endpoint. An existing non-host tunnel route may be the effective
+// route, so it is deliberately ignored here. An exact host route is always
+// rejected, including one through utun, because its ownership is not ours.
 func selectPhysicalBaseRoute(messages []route.Message, target netip.Addr) (physicalBaseRoute, error) {
 	return selectPhysicalBaseRouteWithInterfaceByIndex(messages, target, net.InterfaceByIndex)
 }
