@@ -214,7 +214,7 @@ func TestManualFullRoutePlanIsFixedAndExcludesSyntheticRoutes(t *testing.T) {
 	if frame, err := json.Marshal(manualFullRoutePlanRequest); err != nil || len(frame) > maxFrameBytes {
 		t.Fatalf("full-route frame is not bounded: len=%d err=%v", len(frame), err)
 	}
-	for _, address := range []string{"203.0.113.1", "203.0.113.10", "192.0.2.200", "198.51.100.20"} {
+	for _, address := range []string{"203.0.113.1", "203.0.113.10", "192.0.2.200", "198.51.100.20", "169.254.1.1"} {
 		parsed := netip.MustParseAddr(address)
 		contained := false
 		for _, route := range plan.Routes {
