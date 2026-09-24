@@ -2,12 +2,12 @@
 set -euo pipefail
 
 if [[ $# -ne 1 ]]; then
-    echo "usage: $0 /path/to/AmneziaWG\ Daemon.app" >&2
+    echo "usage: $0 /path/to/AmneziaWG.app" >&2
     exit 64
 fi
 
 app=$1
-executable="$app/Contents/MacOS/AmneziaWG Daemon"
+executable="$app/Contents/MacOS/AmneziaWG"
 [[ -d "$app" && -x "$executable" ]] || { echo "unsigned daemon app is missing" >&2; exit 1; }
 
 home=$(mktemp -d)
