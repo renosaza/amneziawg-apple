@@ -35,8 +35,11 @@ func openBoundedDiagnosticLog(path string) (*boundedDiagnosticLog, error) {
 	if !ok || stat.Uid != 0 {
 		return nil, errors.New("unsafe diagnostics directory")
 	}
-	if info, err := os.Lstat(path); err == nil && (!info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0) {
-		return nil, errors.New("unsafe diagnostics log")
+	if info, err := os.Lstat(path); err == nil {
+		fileStat, ok := info.Sys().(*syscall.Stat_t)
+		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || !ok || fileStat.Uid != 0 || fileStat.Gid != 0 || info.Mode().Perm() != 0600 {
+			return nil, errors.New("unsafe diagnostics log")
+		}
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, errors.New("cannot inspect diagnostics log")
 	}

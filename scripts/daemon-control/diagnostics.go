@@ -139,3 +139,7 @@ func safeDiagnosticEndpoint(value string) string {
 type diagnosticBackend interface {
 	SetDiagnostics(Diagnostics)
 }
+
+type diagnosticOperationBackend interface {
+	SetDiagnosticOperationID(string)
+}

@@ -49,6 +49,7 @@ type tunnelBackend struct {
 	routeSlots              [len(syntheticIPv4RouteSpecs)]bool
 	lastStartStage          string
 	diagnostics             Diagnostics
+	operationID             string
 }
 type tunnelProcess struct {
 	command                 *exec.Cmd
@@ -131,8 +132,15 @@ func (backend *tunnelBackend) SetDiagnostics(diagnostics Diagnostics) {
 	backend.diagnostics = diagnostics
 }
 
+func (backend *tunnelBackend) SetDiagnosticOperationID(operationID string) {
+	backend.operationID = operationID
+}
+
 func (backend *tunnelBackend) event(event DiagnosticEvent) {
 	if backend.diagnostics != nil {
+		if event.OperationID == "" {
+			event.OperationID = backend.operationID
+		}
 		backend.diagnostics.Event(event)
 	}
 }
