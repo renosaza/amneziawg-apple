@@ -44,6 +44,17 @@ In the GUI, import a profile and attempt the action being diagnosed. Then run:
 ./Daemon/real-profile-diagnostics.sh --installed-artifacts
 ```
 
+If the daemon was installed with its separate `--diagnostics` option, collect
+the corresponding root-owned daemon events as well:
+
+```sh
+sudo tail -n 200 /private/var/db/amneziawg-daemon-control-poc/diagnostics.jsonl
+```
+
+That file is distinct from the GUI log. It can contain daemon session UUIDs and
+`utun` names, but never profile configuration or key material. Its opt-in and
+rotation details are in [Daemon diagnostics](daemon-diagnostics.md).
+
 The record contains only a random operation ID, hello capability names, validation
 outcome, route-owner counts, `running`/`degraded`/`stopped` states, installed
 binary SHA-256 values, and fixed protocol error classes.
