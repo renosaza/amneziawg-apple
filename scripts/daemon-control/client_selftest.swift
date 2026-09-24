@@ -123,10 +123,18 @@ struct DaemonControlClientSelfTest {
                 statuses: [DaemonControlProfileStatus(id: profileID, state: .degraded)]
             ) == .degraded
         )
-        try expect(DaemonTunnelState.isAuthoritativelyAbsent(profileID: profileID, statuses: []))
+        try expect(DaemonTunnelState.isAuthoritativelyAbsent(
+            profileID: profileID, statuses: [], knownProfileIDs: [profileID]
+        ))
         try expect(!DaemonTunnelState.isAuthoritativelyAbsent(
             profileID: profileID,
-            statuses: [DaemonControlProfileStatus(id: profileID, state: .running)]
+            statuses: [DaemonControlProfileStatus(id: profileID, state: .running)],
+            knownProfileIDs: [profileID]
+        ))
+        try expect(!DaemonTunnelState.isAuthoritativelyAbsent(
+            profileID: profileID,
+            statuses: [DaemonControlProfileStatus(id: otherProfileID, state: .running)],
+            knownProfileIDs: [profileID]
         ))
     }
 

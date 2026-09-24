@@ -461,17 +461,26 @@ final class DaemonTunnelsManager: TunnelsManager {
             } catch {
                 let stopError = error
                 let refreshedStatus: TunnelStatus
+                let isReconciled: Bool
                 do {
                     let statuses = try DaemonControlClient(socketPath: Self.controlSocketPath).list()
-                    refreshedStatus = Self.tunnelStatus(for: profileID, statuses: statuses)
                     if DaemonTunnelState.isAuthoritativelyAbsent(
-                        profileID: profileID, statuses: statuses
+                        profileID: profileID,
+                        statuses: statuses,
+                        knownProfileIDs: Set(self.tunnels.compactMap(\.daemonProfileID))
                     ) {
                         self.uncertainDaemonProfileIDs.remove(profileID)
+                        refreshedStatus = .inactive
+                        isReconciled = true
+                    } else {
+                        self.uncertainDaemonProfileIDs.insert(profileID)
+                        refreshedStatus = .reasserting
+                        isReconciled = false
                     }
                 } catch {
                     self.uncertainDaemonProfileIDs.insert(profileID)
                     refreshedStatus = .reasserting
+                    isReconciled = false
                 }
                 DispatchQueue.main.async { [weak self, weak tunnel] in
                     guard let self, let tunnel, self.tunnels.contains(tunnel) else { return }
@@ -480,11 +489,17 @@ final class DaemonTunnelsManager: TunnelsManager {
                         "id": diagnosticID, "from": "deactivating",
                         "to": refreshedStatus == .inactive ? "inactive" : "reasserting"
                     ])
-                    DaemonDiagnostics.recordStage(diagnosticID, stage: "deactivation", outcome: "failed")
-                    self.activationDelegate?.tunnelActivationAttemptFailed(
-                        tunnel: tunnel,
-                        error: .daemonModeOperationFailed(systemError: stopError)
+                    DaemonDiagnostics.recordStage(
+                        diagnosticID,
+                        stage: "deactivation",
+                        outcome: isReconciled ? "finished" : "failed"
                     )
+                    if !isReconciled {
+                        self.activationDelegate?.tunnelActivationAttemptFailed(
+                            tunnel: tunnel,
+                            error: .daemonModeOperationFailed(systemError: stopError)
+                        )
+                    }
                 }
             }
         }
