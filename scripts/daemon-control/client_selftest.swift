@@ -10,6 +10,7 @@ struct DaemonControlClientSelfTest {
             try testFraming()
             try testSocketTransport()
             try testResponses()
+            try testHelloProtocol()
             try testDaemonTunnelState()
             try testLifecycleProtocol()
             print("daemon-control Swift client self-check passed")
@@ -67,6 +68,29 @@ struct DaemonControlClientSelfTest {
         try DaemonControlProtocol.writeFrame(response, to: descriptors[1], deadline: deadline)
         let received = try DaemonControlProtocol.readFrame(from: descriptors[0], deadline: deadline)
         try expect(received == response)
+    }
+
+    private static func testHelloProtocol() throws {
+        let hello = try DaemonControlProtocol.makeRequest(operation: "hello", profileID: nil)
+        let request = try requestObject(hello)
+        try expect(request["version"] as? Int == DaemonControlProtocol.protocolVersion)
+        try expect(request["operation"] as? String == "hello")
+        try expect(request["profile_id"] == nil)
+        try expect(request["config"] == nil)
+
+        try DaemonControlProtocol.decodeHelloResponse(
+            Data("{\"ok\":true,\"protocol_version\":1}".utf8)
+        )
+        for response in [
+            "{\"ok\":true}",
+            "{\"ok\":true,\"protocol_version\":2}",
+            "{\"ok\":false,\"error\":\"invalid_request\"}",
+            "{\"ok\":true,\"protocol_version\":1,\"profiles\":[]}" // Hello must not carry state.
+        ] {
+            try expectIncompatibleDaemon {
+                try DaemonControlProtocol.decodeHelloResponse(Data(response.utf8))
+            }
+        }
     }
 
     private static func testDaemonTunnelState() throws {
@@ -175,6 +199,15 @@ struct DaemonControlClientSelfTest {
             return
         }
         throw SelfTestError.expectedFailure
+    }
+
+    private static func expectIncompatibleDaemon(_ body: () throws -> Void) throws {
+        do {
+            try body()
+            throw SelfTestError.expectedFailure
+        } catch let error as DaemonControlClientError {
+            try expect(error == .incompatibleDaemon)
+        }
     }
 
     private enum SelfTestError: Error {

@@ -161,6 +161,35 @@ func TestStartStopStatusAndList(t *testing.T) {
 	}
 }
 
+func TestHelloReportsProtocolVersionWithoutSideEffects(t *testing.T) {
+	backend := &fakeBackend{}
+	server, err := NewServerWithBackend(501, backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := exchange(t, server, 501, requestFrame(t, `{"version":1,"operation":"hello"}`))
+	if !response.OK || response.Error != "" || response.ProtocolVersion != protocolVersion || response.Profile != nil || response.Profiles != nil {
+		t.Fatalf("hello response: %#v", response)
+	}
+	starts, stops := backend.counts()
+	if starts != 0 || stops != 0 || len(server.profiles) != 0 {
+		t.Fatalf("hello changed daemon state: starts=%d stops=%d profiles=%d", starts, stops, len(server.profiles))
+	}
+}
+
+func TestHelloRejectsProfileDataAndWrongVersion(t *testing.T) {
+	for _, frame := range []string{
+		`{"version":1,"operation":"hello","profile_id":"` + profileID + `"}`,
+		`{"version":1,"operation":"hello","config":"private_key=synthetic"}`,
+		`{"version":1,"operation":"hello","route_plan":{"local_address":"192.0.2.2/32","routes":[]}}`,
+		`{"version":2,"operation":"hello"}`,
+	} {
+		if _, err := decodeRequest([]byte(frame)); err == nil {
+			t.Fatalf("accepted invalid hello request %s", frame)
+		}
+	}
+}
+
 func TestQuiesceRejectsActiveSessionsAndBlocksNewOnSuccess(t *testing.T) {
 	server, err := NewServerWithBackend(501, &fakeBackend{})
 	if err != nil {
