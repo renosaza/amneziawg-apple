@@ -42,6 +42,9 @@ jobs:
         run: scripts/test-unsigned-daemon-gui-target.sh
       - name: Test unsigned macOS release workflow boundaries
         run: scripts/test-unsigned-macos-release-workflow.sh
+
+      - name: Test Sparkle staged Info.plist
+        run: scripts/test-sparkle-staged-info-plist.sh
       - name: Compile macOS application targets without signing
         shell: bash
         run: |

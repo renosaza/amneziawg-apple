@@ -41,6 +41,7 @@ assert info["CFBundleIdentifier"] == "com.renosaza.amneziawg.daemon-gui"
 assert str(info["CFBundleVersion"]).isdigit()
 assert info["SUFeedURL"].startswith("https://")
 assert len(base64.b64decode(info["SUPublicEDKey"], validate=True)) == 32
+assert info["SUEnableAutomaticChecks"] is True
 assert info["SURequireSignedFeed"] is True
 assert info["SUVerifyUpdateBeforeExtraction"] is True
 PY

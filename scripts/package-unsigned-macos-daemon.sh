@@ -88,21 +88,7 @@ mkdir -p "$package_root/Daemon"
 ditto "$app_source" "$package_root/AmneziaWG.app"
 if [[ -n $sparkle_feed_url ]]; then
     SPARKLE_FEED_URL="$sparkle_feed_url" SPARKLE_PUBLIC_ED_KEY="$sparkle_public_ed_key" \
-        python3 - "$package_root/AmneziaWG.app/Contents/Info.plist" <<'PY'
-import os
-import plistlib
-import sys
-
-path = sys.argv[1]
-with open(path, "rb") as source:
-    info = plistlib.load(source)
-info["SUFeedURL"] = os.environ["SPARKLE_FEED_URL"]
-info["SUPublicEDKey"] = os.environ["SPARKLE_PUBLIC_ED_KEY"]
-info["SURequireSignedFeed"] = True
-info["SUVerifyUpdateBeforeExtraction"] = True
-with open(path, "wb") as destination:
-    plistlib.dump(info, destination, sort_keys=False)
-PY
+        python3 "$root/scripts/stage-sparkle-info-plist.py" "$package_root/AmneziaWG.app/Contents/Info.plist"
 fi
 # This is an ad-hoc signature only. It establishes no developer identity and
 # does not avoid Gatekeeper approval on another Mac.
