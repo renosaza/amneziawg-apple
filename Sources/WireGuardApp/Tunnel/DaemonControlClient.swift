@@ -4,6 +4,82 @@ import Darwin
 import Dispatch
 import Foundation
 
+enum DaemonDiagnosticFileSink {
+    static let defaultDirectory = FileManager.default.urls(
+        for: .libraryDirectory, in: .userDomainMask
+    )[0].appendingPathComponent("Logs/AmneziaWGDaemon", isDirectory: true)
+    private static let filename = "daemon-diagnostics.log"
+    private static let maximumLogBytes = 128 * 1024
+    private static let writeQueue = DispatchQueue(label: "com.amneziawg.daemon-diagnostics")
+
+    @discardableResult
+    static func append(_ message: String, directory: URL = defaultDirectory) -> Bool {
+        writeQueue.sync {
+            appendLocked(message, directory: directory)
+        }
+    }
+
+    private static func appendLocked(_ message: String, directory: URL) -> Bool {
+        let manager = FileManager.default
+        do {
+            try manager.createDirectory(at: directory, withIntermediateDirectories: true,
+                                        attributes: [.posixPermissions: 0o700])
+        } catch {
+            return false
+        }
+
+        let directoryDescriptor = Darwin.open(directory.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard directoryDescriptor >= 0 else { return false }
+        defer { _ = Darwin.close(directoryDescriptor) }
+
+        var directoryInfo = stat()
+        guard fstat(directoryDescriptor, &directoryInfo) == 0,
+              directoryInfo.st_uid == geteuid(),
+              directoryInfo.st_nlink >= 1,
+              directoryInfo.st_mode & S_IFMT == S_IFDIR,
+              directoryInfo.st_mode & 0o777 == 0o700
+        else { return false }
+
+        let descriptor = Darwin.openat(
+            directoryDescriptor, filename, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600
+        )
+        guard descriptor >= 0 else { return false }
+        defer { _ = Darwin.close(descriptor) }
+
+        var fileInfo = stat()
+        guard fstat(descriptor, &fileInfo) == 0,
+              fileInfo.st_uid == geteuid(),
+              fileInfo.st_nlink == 1,
+              fileInfo.st_mode & S_IFMT == S_IFREG,
+              fileInfo.st_mode & 0o777 == 0o600
+        else { return false }
+
+        let data = Data("\(ISO8601DateFormatter().string(from: Date())) \(message)\n".utf8)
+        if fileInfo.st_size + off_t(data.count) > off_t(maximumLogBytes), ftruncate(descriptor, 0) != 0 {
+            return false
+        }
+        return writeAll(data, to: descriptor)
+    }
+
+    private static func writeAll(_ data: Data, to descriptor: Int32) -> Bool {
+        data.withUnsafeBytes { bytes in
+            guard let baseAddress = bytes.baseAddress else { return false }
+            var offset = 0
+            while offset < bytes.count {
+                let written = Darwin.write(descriptor, baseAddress.advanced(by: offset), bytes.count - offset)
+                if written > 0 {
+                    offset += written
+                } else if written < 0, errno == EINTR {
+                    continue
+                } else {
+                    return false
+                }
+            }
+            return true
+        }
+    }
+}
+
 enum DaemonControlProfileState: String, Equatable {
     case running
     case degraded
@@ -33,34 +109,78 @@ enum DaemonControlClientError: Error, Equatable {
     case invalidResponse
     case incompatibleDaemon
     case daemonRejected
+
+    var diagnosticCode: String {
+        switch self {
+        case .invalidSocketPath: return "invalid_socket_path"
+        case .invalidTimeout: return "invalid_timeout"
+        case .invalidConfiguration: return "invalid_configuration"
+        case .connectionFailed: return "connection_failed"
+        case .timedOut: return "timed_out"
+        case .invalidResponse: return "invalid_response"
+        case .incompatibleDaemon: return "incompatible_daemon"
+        case .daemonRejected: return "daemon_rejected"
+        }
+    }
 }
 
 /// macOS client for the version 1 daemon-control POC protocol.
 final class DaemonControlClient {
+    /// Assigned by the daemon GUI only. The client never records request or response bytes.
+    static var diagnosticHandler: ((String, [String: String]) -> Void)?
     private let socketPath: String
     private let timeout: TimeInterval
+    private let diagnosticOperationID: String?
 
-    init(socketPath: String, timeout: TimeInterval = 2) throws {
+    init(socketPath: String, timeout: TimeInterval = 2, diagnosticOperationID: String? = nil) throws {
         guard DaemonControlProtocol.isValidSocketPath(socketPath) else {
             throw DaemonControlClientError.invalidSocketPath
         }
         guard timeout.isFinite, timeout > 0, timeout <= 30 else { throw DaemonControlClientError.invalidTimeout }
         self.socketPath = socketPath
         self.timeout = timeout
+        self.diagnosticOperationID = diagnosticOperationID
     }
 
     func list() throws -> [DaemonControlProfileStatus] {
-        try verifyCompatibility()
-        return try DaemonControlProtocol.decodeListResponse(request(operation: "list", profileID: nil))
+        do {
+            try verifyCompatibility()
+            let statuses = try DaemonControlProtocol.decodeListResponse(request(operation: "list", profileID: nil))
+            let states = Dictionary(grouping: statuses, by: \.state.rawValue).map {
+                "\($0.key):\($0.value.count)"
+            }.sorted().joined(separator: ",")
+            record("list", fields: ["profiles": "\(statuses.count)", "states": states])
+            return statuses
+        } catch {
+            recordError(operation: "list", error: error)
+            throw error
+        }
     }
 
     func status(profileID: UUID) throws -> DaemonControlProfileStatus {
-        try verifyCompatibility()
-        return try DaemonControlProtocol.decodeStatusResponse(request(operation: "status", profileID: profileID), expectedProfileID: profileID)
+        do {
+            try verifyCompatibility()
+            let status = try DaemonControlProtocol.decodeStatusResponse(
+                request(operation: "status", profileID: profileID), expectedProfileID: profileID)
+            record("status", fields: ["state": status.state.rawValue])
+            return status
+        } catch {
+            recordError(operation: "status", error: error)
+            throw error
+        }
     }
 
     func capabilities() throws -> DaemonControlCapabilities {
-        try DaemonControlProtocol.decodeHelloResponse(request(operation: "hello", profileID: nil))
+        do {
+            let capabilities = try DaemonControlProtocol.decodeHelloResponse(request(operation: "hello", profileID: nil))
+            record("hello", fields: [
+                "capabilities": capabilities.values.sorted().joined(separator: ",")
+            ])
+            return capabilities
+        } catch {
+            recordError(operation: "hello", error: error)
+            throw error
+        }
     }
 
     func start<RoutePlan: Encodable>(
@@ -68,24 +188,50 @@ final class DaemonControlClient {
         uapiConfiguration: String,
         routePlan: RoutePlan
     ) throws -> DaemonControlProfileStatus {
-        try verifyCompatibility()
-        let response = try request(
-            operation: "start",
-            profileID: profileID,
-            uapiConfiguration: uapiConfiguration,
-            routePlan: routePlan
-        )
-        return try DaemonControlProtocol.decodeStartResponse(response, expectedProfileID: profileID)
+        do {
+            try verifyCompatibility()
+            let response = try request(
+                operation: "start",
+                profileID: profileID,
+                uapiConfiguration: uapiConfiguration,
+                routePlan: routePlan
+            )
+            let status = try DaemonControlProtocol.decodeStartResponse(response, expectedProfileID: profileID)
+            record("start", fields: ["state": status.state.rawValue])
+            return status
+        } catch {
+            recordError(operation: "start", error: error)
+            throw error
+        }
     }
 
     func stop(profileID: UUID) throws {
-        try verifyCompatibility()
-        let response = try request(operation: "stop", profileID: profileID)
-        try DaemonControlProtocol.decodeStopResponse(response, expectedProfileID: profileID)
+        do {
+            try verifyCompatibility()
+            let response = try request(operation: "stop", profileID: profileID)
+            try DaemonControlProtocol.decodeStopResponse(response, expectedProfileID: profileID)
+            record("stop", fields: ["state": "stopped"])
+        } catch {
+            recordError(operation: "stop", error: error)
+            throw error
+        }
     }
 
     private func verifyCompatibility() throws {
         _ = try capabilities()
+    }
+
+    private func record(_ event: String, fields: [String: String]) {
+        var fields = fields
+        if let diagnosticOperationID {
+            fields["id"] = diagnosticOperationID
+        }
+        Self.diagnosticHandler?(event, fields)
+    }
+
+    private func recordError(operation: String, error: Error) {
+        let code = (error as? DaemonControlClientError)?.diagnosticCode ?? "unknown_error"
+        record("protocol_error", fields: ["operation": operation, "class": code])
     }
 
     private func request(operation: String, profileID: UUID?, uapiConfiguration: String? = nil) throws -> Data {
