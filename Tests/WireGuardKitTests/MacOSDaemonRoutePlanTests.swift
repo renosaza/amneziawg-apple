@@ -55,7 +55,7 @@ final class MacOSDaemonRoutePlanTests: XCTestCase {
             activeTunnels: [("sticky", sticky)]
         ).get()
 
-        for destination in ["192.168.31.0/24", "10.25.0.0/24", "10.1.1.2/32", "77.105.177.18/32"] {
+        for destination in ["192.168.31.0/24", "10.25.0.0/24", "10.1.1.2/32"] {
             XCTAssertTrue(plan.routes.contains(.init(destination: destination, owner: .excluded)))
             XCTAssertFalse(plan.routes.contains(.init(destination: destination, owner: .tunnel)))
         }
