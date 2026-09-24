@@ -63,7 +63,7 @@ func TestManualRoutePlanStartAndCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	failed := exchange(t, server, 501, requestFrame(t, string(failedFrame)))
-	if failed.OK || failed.Error != "start_failed" {
+	if failed.OK || failed.Error != "planned_session_active" {
 		t.Fatalf("route-plan collision start: %#v", failed)
 	}
 	if _, found := server.profiles[profileIDTwo]; found {
