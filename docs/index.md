@@ -26,7 +26,7 @@
 - [Runtime validation](work/runtime-validation.md): actual local runtime-check status and pending matrix.
 - [Free macOS `utun` POC](guides/free-macos-utun-poc.md): synthetic-only CLI experiment.
 - [Synthetic `utun` traffic POC](guides/free-macos-utun-traffic-poc.md): manual disposable-runner proof.
-- [Unsigned macOS daemon package](guides/unsigned-macos-daemon-package.md): installation and bounded GUI-update procedure.
+- [Real-profile smoke test](guides/real-profile-smoke.md): redacted operator checklist for the experimental unsigned daemon package.
 - [Unsigned macOS daemon package](guides/unsigned-macos-daemon-package.md): CI-only experimental GUI package and rollback procedure.
 - [Single-`utun` helper POC](guides/free-macos-single-helper-poc.md): isolated root-helper start/status/stop proof.
 
