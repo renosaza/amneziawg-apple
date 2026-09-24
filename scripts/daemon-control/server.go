@@ -309,7 +309,7 @@ func validRoutePlan(raw json.RawMessage) error {
 	localAddress, err := netip.ParsePrefix(plan.LocalAddress)
 	if err != nil || !localAddress.Addr().Is4() || localAddress.Bits() != 32 ||
 		localAddress != localAddress.Masked() || localAddress.String() != plan.LocalAddress ||
-		!usableLocalIPv4(localAddress.Addr()) {
+		!usableIPv4Address(localAddress.Addr()) {
 		return errors.New("invalid route plan")
 	}
 	decoder = json.NewDecoder(bytes.NewReader(plan.Routes))
@@ -327,7 +327,7 @@ func validRoutePlan(raw json.RawMessage) error {
 	seen := make(map[netip.Prefix]struct{}, len(routes))
 	for _, route := range routes {
 		prefix, err := netip.ParsePrefix(route.Destination)
-		if err != nil || !prefix.Addr().Is4() || prefix != prefix.Masked() || prefix.String() != route.Destination || prefix.Bits() <= 1 {
+		if err != nil || !usableIPv4Address(prefix.Addr()) || prefix != prefix.Masked() || prefix.String() != route.Destination || prefix.Bits() <= 1 {
 			return errors.New("invalid route plan")
 		}
 		if route.Owner != "tunnel" && route.Owner != "physicalEndpoint" {
@@ -344,7 +344,7 @@ func validRoutePlan(raw json.RawMessage) error {
 	return nil
 }
 
-func usableLocalIPv4(address netip.Addr) bool {
+func usableIPv4Address(address netip.Addr) bool {
 	if !address.Is4() || !address.IsGlobalUnicast() {
 		return false
 	}
@@ -392,7 +392,7 @@ func validRoutePlanMatchesConfig(raw json.RawMessage, config string) error {
 			allowedIP = prefix
 		case "endpoint":
 			address, err := netip.ParseAddrPort(value)
-			if err != nil || !address.Addr().Is4() {
+			if err != nil || !usableIPv4Address(address.Addr()) {
 				return errors.New("invalid route plan")
 			}
 			endpoints++
