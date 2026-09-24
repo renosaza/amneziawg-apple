@@ -117,6 +117,11 @@ struct DaemonControlClientSelfTest {
                 statuses: [DaemonControlProfileStatus(id: profileID, state: .degraded)]
             ) == .degraded
         )
+        try expect(DaemonTunnelState.isAuthoritativelyAbsent(profileID: profileID, statuses: []))
+        try expect(!DaemonTunnelState.isAuthoritativelyAbsent(
+            profileID: profileID,
+            statuses: [DaemonControlProfileStatus(id: profileID, state: .running)]
+        ))
     }
 
     private static func testLifecycleProtocol() throws {
