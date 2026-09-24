@@ -4,6 +4,82 @@ import Darwin
 import Dispatch
 import Foundation
 
+enum DaemonDiagnosticFileSink {
+    static let defaultDirectory = FileManager.default.urls(
+        for: .libraryDirectory, in: .userDomainMask
+    )[0].appendingPathComponent("Logs/AmneziaWGDaemon", isDirectory: true)
+    private static let filename = "daemon-diagnostics.log"
+    private static let maximumLogBytes = 128 * 1024
+    private static let writeQueue = DispatchQueue(label: "com.amneziawg.daemon-diagnostics")
+
+    @discardableResult
+    static func append(_ message: String, directory: URL = defaultDirectory) -> Bool {
+        writeQueue.sync {
+            appendLocked(message, directory: directory)
+        }
+    }
+
+    private static func appendLocked(_ message: String, directory: URL) -> Bool {
+        let manager = FileManager.default
+        do {
+            try manager.createDirectory(at: directory, withIntermediateDirectories: true,
+                                        attributes: [.posixPermissions: 0o700])
+        } catch {
+            return false
+        }
+
+        let directoryDescriptor = Darwin.open(directory.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard directoryDescriptor >= 0 else { return false }
+        defer { _ = Darwin.close(directoryDescriptor) }
+
+        var directoryInfo = stat()
+        guard fstat(directoryDescriptor, &directoryInfo) == 0,
+              directoryInfo.st_uid == geteuid(),
+              directoryInfo.st_nlink >= 1,
+              directoryInfo.st_mode & S_IFMT == S_IFDIR,
+              directoryInfo.st_mode & 0o777 == 0o700
+        else { return false }
+
+        let descriptor = Darwin.openat(
+            directoryDescriptor, filename, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600
+        )
+        guard descriptor >= 0 else { return false }
+        defer { _ = Darwin.close(descriptor) }
+
+        var fileInfo = stat()
+        guard fstat(descriptor, &fileInfo) == 0,
+              fileInfo.st_uid == geteuid(),
+              fileInfo.st_nlink == 1,
+              fileInfo.st_mode & S_IFMT == S_IFREG,
+              fileInfo.st_mode & 0o777 == 0o600
+        else { return false }
+
+        let data = Data("\(ISO8601DateFormatter().string(from: Date())) \(message)\n".utf8)
+        if fileInfo.st_size + off_t(data.count) > off_t(maximumLogBytes), ftruncate(descriptor, 0) != 0 {
+            return false
+        }
+        return writeAll(data, to: descriptor)
+    }
+
+    private static func writeAll(_ data: Data, to descriptor: Int32) -> Bool {
+        data.withUnsafeBytes { bytes in
+            guard let baseAddress = bytes.baseAddress else { return false }
+            var offset = 0
+            while offset < bytes.count {
+                let written = Darwin.write(descriptor, baseAddress.advanced(by: offset), bytes.count - offset)
+                if written > 0 {
+                    offset += written
+                } else if written < 0, errno == EINTR {
+                    continue
+                } else {
+                    return false
+                }
+            }
+            return true
+        }
+    }
+}
+
 enum DaemonControlProfileState: String, Equatable {
     case running
     case degraded
@@ -54,14 +130,16 @@ final class DaemonControlClient {
     static var diagnosticHandler: ((String, [String: String]) -> Void)?
     private let socketPath: String
     private let timeout: TimeInterval
+    private let diagnosticOperationID: String?
 
-    init(socketPath: String, timeout: TimeInterval = 2) throws {
+    init(socketPath: String, timeout: TimeInterval = 2, diagnosticOperationID: String? = nil) throws {
         guard DaemonControlProtocol.isValidSocketPath(socketPath) else {
             throw DaemonControlClientError.invalidSocketPath
         }
         guard timeout.isFinite, timeout > 0, timeout <= 30 else { throw DaemonControlClientError.invalidTimeout }
         self.socketPath = socketPath
         self.timeout = timeout
+        self.diagnosticOperationID = diagnosticOperationID
     }
 
     func list() throws -> [DaemonControlProfileStatus] {
@@ -144,6 +222,10 @@ final class DaemonControlClient {
     }
 
     private func record(_ event: String, fields: [String: String]) {
+        var fields = fields
+        if let diagnosticOperationID {
+            fields["id"] = diagnosticOperationID
+        }
         Self.diagnosticHandler?(event, fields)
     }
 

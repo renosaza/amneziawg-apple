@@ -7,11 +7,6 @@ import Foundation
 /// It never receives a profile, route destination, UAPI configuration, or raw error.
 private enum DaemonDiagnostics {
     static let userDefaultsKey = "DaemonDiagnosticLogging"
-    static let logFileURL: URL = FileManager.default.urls(
-        for: .libraryDirectory, in: .userDomainMask
-    )[0].appendingPathComponent("Logs/AmneziaWGDaemon/daemon-diagnostics.log")
-    private static let maximumLogBytes = 128 * 1024
-
     static func install() {
         DaemonControlClient.diagnosticHandler = record
     }
@@ -33,7 +28,7 @@ private enum DaemonDiagnostics {
         }
         let message = "Daemon diagnostic: \(event)\(renderedFields.isEmpty ? "" : " \(renderedFields.joined(separator: " "))")"
         wg_log(.info, message: message)
-        appendToUserLog(message)
+        _ = DaemonDiagnosticFileSink.append(message)
     }
 
     static func recordRoutePlan(_ plan: MacOSDaemonRoutePlan) {
@@ -60,32 +55,6 @@ private enum DaemonDiagnostics {
         record("operation", fields: ["id": operationID, "stage": stage, "outcome": outcome])
     }
 
-    private static func appendToUserLog(_ message: String) {
-        let manager = FileManager.default
-        let directory = logFileURL.deletingLastPathComponent()
-        do {
-            try manager.createDirectory(at: directory, withIntermediateDirectories: true,
-                                        attributes: [.posixPermissions: 0o700])
-            let line = "\(ISO8601DateFormatter().string(from: Date())) \(message)\n"
-            let data = Data(line.utf8)
-            let size = (try? manager.attributesOfItem(atPath: logFileURL.path)[.size] as? NSNumber)?.intValue ?? 0
-            if size + data.count > maximumLogBytes {
-                try data.write(to: logFileURL, options: .atomic)
-                try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: logFileURL.path)
-                return
-            }
-            if !manager.fileExists(atPath: logFileURL.path) {
-                manager.createFile(atPath: logFileURL.path, contents: nil,
-                                   attributes: [.posixPermissions: 0o600])
-            }
-            let handle = try FileHandle(forWritingTo: logFileURL)
-            defer { try? handle.close() }
-            try handle.seekToEnd()
-            try handle.write(contentsOf: data)
-        } catch {
-            // Diagnostics must never affect profile activation or leak an error into another log.
-        }
-    }
 }
 
 final class DaemonTunnelsManager: TunnelsManager {
@@ -348,7 +317,8 @@ final class DaemonTunnelsManager: TunnelsManager {
             let capabilities: DaemonControlCapabilities
             let statuses: [DaemonControlProfileStatus]
             do {
-                client = try DaemonControlClient(socketPath: Self.controlSocketPath)
+                client = try DaemonControlClient(
+                    socketPath: Self.controlSocketPath, diagnosticOperationID: diagnosticID)
                 capabilities = try client.capabilities()
                 statuses = try client.list()
             } catch {
@@ -469,7 +439,9 @@ final class DaemonTunnelsManager: TunnelsManager {
         mutationQueue.async { [weak self, weak tunnel] in
             guard let self else { return }
             do {
-                try DaemonControlClient(socketPath: Self.controlSocketPath).stop(profileID: profileID)
+                try DaemonControlClient(
+                    socketPath: Self.controlSocketPath, diagnosticOperationID: diagnosticID
+                ).stop(profileID: profileID)
                 self.uncertainDaemonProfileIDs.remove(profileID)
                 DispatchQueue.main.async { [weak self, weak tunnel] in
                     guard let self, let tunnel, self.tunnels.contains(tunnel) else { return }
