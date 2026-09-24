@@ -38,7 +38,8 @@ if grep -Eq 'guard statuses\.isEmpty else' "$manager"; then
     exit 1
 fi
 grep -Eq 'client\.start\(' "$manager"
-grep -Eq 'DaemonControlClient\(socketPath: Self\.controlSocketPath\)\.stop\(' "$manager"
+grep -Eq 'diagnosticOperationID: diagnosticID' "$manager"
+grep -Eq '\)\.stop\(profileID: profileID\)' "$manager"
 grep -Eq 'DaemonControlClient\(socketPath: controlSocketPath\)\.list\(\)' "$manager"
 grep -Eq -- '--daemon-self-check' "$repo_dir/Sources/WireGuardApp/UI/macOS/AppDelegate.swift"
 grep -Eq 'store\.save\(' "$manager"
