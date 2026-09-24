@@ -43,7 +43,6 @@ enum TunnelsManagerActivationAttemptError: WireGuardAppError {
     case failedBecauseOfTooManyErrors(lastSystemError: Error) // recursion limit reached
     case daemonModeOperationUnavailable
     case daemonModeUnsupportedProfile
-    case daemonModeSingleTunnelOnly
     case daemonModeOperationFailed(systemError: Error)
     case daemonModeStateUncertain
 
@@ -59,8 +58,6 @@ enum TunnelsManagerActivationAttemptError: WireGuardAppError {
             return ("Unavailable", "This operation is not available in unsigned daemon mode yet.")
         case .daemonModeUnsupportedProfile:
             return ("Unsupported profile", "Unsigned daemon mode currently supports one IPv4 split tunnel with one literal IPv4 peer endpoint.")
-        case .daemonModeSingleTunnelOnly:
-            return ("Unavailable", "Unsigned daemon mode currently supports one active tunnel.")
         case .daemonModeOperationFailed(let systemError):
             return ("Daemon operation failed", systemError.localizedUIString)
         case .daemonModeStateUncertain:

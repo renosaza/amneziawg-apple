@@ -76,6 +76,19 @@ final class MacOSDaemonRoutePlanTests: XCTestCase {
         ])
     }
 
+    func testSingleIPv4SplitRejectsOverlappingActiveSplitTunnel() {
+        let result = MacOSDaemonRoutePlan.buildSingleIPv4Split(
+            activating: "pdkkfc",
+            configuration: configuration(
+                allowed: ["10.25.0.0/24"], endpoint: Endpoint(from: "198.51.100.11:51820")!),
+            activeTunnels: [("CM", configuration(
+                allowed: ["10.25.0.0/24"], endpoint: Endpoint(from: "198.51.100.10:51820")!))]
+        )
+
+        XCTAssertEqual(result, .failure(.routePlan(.routeOwnership(.routeConflict(
+            RouteOwnershipConflict(route: IPAddressRange(from: "10.25.0.0/24")!, ownerName: "CM"))))))
+    }
+
     func testRejectsUnsupportedSingleIPv4SplitProfiles() {
         let endpoint = Endpoint(from: "198.51.100.10:51820")!
         let hostname = Endpoint(from: "vpn.example.test:51820")!

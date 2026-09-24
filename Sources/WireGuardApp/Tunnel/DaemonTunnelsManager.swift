@@ -221,20 +221,6 @@ final class DaemonTunnelsManager: TunnelsManager {
             activationDelegate?.tunnelActivationAttemptFailed(tunnel: tunnel, error: .tunnelIsNotInactive)
             return
         }
-        let plan: MacOSDaemonRoutePlan
-        switch MacOSDaemonRoutePlan.buildSingleIPv4Split(
-            activating: tunnel.name,
-            configuration: configuration
-        ) {
-        case .success(let builtPlan):
-            plan = builtPlan
-        case .failure:
-            activationDelegate?.tunnelActivationAttemptFailed(
-                tunnel: tunnel,
-                error: .daemonModeUnsupportedProfile
-            )
-            return
-        }
         guard let endpoint = configuration.peers.first?.endpoint else {
             activationDelegate?.tunnelActivationAttemptFailed(
                 tunnel: tunnel,
@@ -247,9 +233,10 @@ final class DaemonTunnelsManager: TunnelsManager {
             tunnelConfiguration: configuration,
             resolvedEndpoints: [endpoint]
         ).uapiConfiguration().0
+        let localProfiles = daemonProfiles()
         tunnel.status = .activating
-        mutationQueue.async { [weak tunnel] in
-            guard let tunnel else { return }
+        mutationQueue.async { [weak self, weak tunnel] in
+            guard let self, let tunnel else { return }
             let client: DaemonControlClient
             let statuses: [DaemonControlProfileStatus]
             do {
@@ -267,14 +254,38 @@ final class DaemonTunnelsManager: TunnelsManager {
                 }
                 return
             }
-            guard statuses.isEmpty else {
+            guard let activeTunnels = Self.activeDaemonTunnels(
+                from: statuses,
+                localProfiles: localProfiles,
+                excluding: profileID
+            ) else {
+                DispatchQueue.main.async { [weak self, weak tunnel] in
+                    guard let self, let tunnel, self.tunnels.contains(tunnel) else { return }
+                    self.markDaemonStatusesDegraded()
+                    tunnel.status = .reasserting
+                    self.activationDelegate?.tunnelActivationAttemptFailed(
+                        tunnel: tunnel,
+                        error: .daemonModeStateUncertain
+                    )
+                }
+                return
+            }
+            let plan: MacOSDaemonRoutePlan
+            switch MacOSDaemonRoutePlan.buildSingleIPv4Split(
+                activating: tunnel.name,
+                configuration: configuration,
+                activeTunnels: activeTunnels
+            ) {
+            case .success(let builtPlan):
+                plan = builtPlan
+            case .failure(let error):
                 DispatchQueue.main.async { [weak self, weak tunnel] in
                     guard let self, let tunnel, self.tunnels.contains(tunnel) else { return }
                     self.applyDaemonStatuses(statuses)
-                    tunnel.status = Self.tunnelStatus(for: profileID, statuses: statuses)
+                    tunnel.status = .inactive
                     self.activationDelegate?.tunnelActivationAttemptFailed(
                         tunnel: tunnel,
-                        error: .daemonModeSingleTunnelOnly
+                        error: Self.activationError(for: error, activating: tunnel.name)
                     )
                 }
                 return
@@ -360,6 +371,10 @@ final class DaemonTunnelsManager: TunnelsManager {
     }
 
     private func applyDaemonStatuses(_ statuses: [DaemonControlProfileStatus]) {
+        guard Set(statuses.map(\.id)).isSubset(of: Set(tunnels.compactMap(\.daemonProfileID))) else {
+            markDaemonStatusesDegraded()
+            return
+        }
         for tunnel in tunnels where tunnel.status != .activating && tunnel.status != .deactivating {
             guard let profileID = tunnel.daemonProfileID else { continue }
             tunnel.status = Self.tunnelStatus(for: profileID, statuses: statuses)
@@ -396,6 +411,45 @@ final class DaemonTunnelsManager: TunnelsManager {
                 if orphanedProfileStopIsConfirmed(profileID) { return }
             }
             wg_log(.error, message: "Daemon cleanup could not be confirmed for profile \(profileID.uuidString.lowercased())")
+        }
+    }
+
+    private func daemonProfiles() -> [UUID: (name: String, configuration: TunnelConfiguration)] {
+        Dictionary(uniqueKeysWithValues: tunnels.compactMap { tunnel in
+            guard let profileID = tunnel.daemonProfileID,
+                  let configuration = tunnel.tunnelConfiguration
+            else { return nil }
+            return (profileID, (name: tunnel.name, configuration: configuration))
+        })
+    }
+
+    private static func activeDaemonTunnels(
+        from statuses: [DaemonControlProfileStatus],
+        localProfiles: [UUID: (name: String, configuration: TunnelConfiguration)],
+        excluding activatingProfileID: UUID
+    ) -> [(name: String, configuration: TunnelConfiguration)]? {
+        guard !statuses.contains(where: { $0.id == activatingProfileID }) else { return nil }
+        var activeTunnels: [(name: String, configuration: TunnelConfiguration)] = []
+        for status in statuses {
+            guard let profile = localProfiles[status.id] else { return nil }
+            activeTunnels.append((name: profile.name, configuration: profile.configuration))
+        }
+        return activeTunnels
+    }
+
+    private static func activationError(
+        for error: MacOSDaemonSingleSplitProfileError, activating name: String
+    ) -> TunnelsManagerActivationAttemptError {
+        switch error {
+        case .unsupportedConfiguration:
+            return .daemonModeUnsupportedProfile
+        case .routePlan(.routeOwnership(.routeConflict(let conflict))):
+            return .routeConflict(
+                tunnelName: name, route: conflict.route.stringRepresentation, ownerName: conflict.ownerName)
+        case .routePlan(.routeOwnership(.missingEndpointExclusion(let tunnelName, let endpoint))):
+            return .missingEndpointExclusion(tunnelName: tunnelName, endpoint: endpoint)
+        case .routePlan:
+            return .daemonModeUnsupportedProfile
         }
     }
 

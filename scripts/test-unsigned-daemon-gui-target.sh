@@ -29,6 +29,12 @@ if grep -Eq 'NETunnelProviderManager|sendProviderMessage' "$manager"; then
 fi
 # Decision 0017 permits only this bounded daemon-control lifecycle surface.
 grep -Eq 'MacOSDaemonRoutePlan\.buildSingleIPv4Split' "$manager"
+grep -Eq 'activeDaemonTunnels\(' "$manager"
+grep -Eq 'activeTunnels: activeTunnels' "$manager"
+if grep -Eq 'guard statuses\.isEmpty else' "$manager"; then
+    echo 'daemon GUI manager must validate new routes against running daemon profiles' >&2
+    exit 1
+fi
 grep -Eq 'client\.start\(' "$manager"
 grep -Eq 'DaemonControlClient\(socketPath: Self\.controlSocketPath\)\.stop\(' "$manager"
 grep -Eq 'DaemonControlClient\(socketPath: controlSocketPath\)\.list\(\)' "$manager"
