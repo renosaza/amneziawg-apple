@@ -63,7 +63,7 @@ payload_sha256 = {}
 for path in sorted(root.rglob("*")):
     assert not path.is_symlink(), f"package contains a symbolic link: {path.relative_to(root)}"
     assert path.is_dir() or path.is_file(), f"package contains an unexpected path: {path.relative_to(root)}"
-    if path.is_file() and path.name != "MANIFEST.json":
+    if path.is_file() and path.relative_to(root) != Path("MANIFEST.json"):
         digest = hashlib.sha256()
         with path.open("rb") as artifact:
             for chunk in iter(lambda: artifact.read(1024 * 1024), b""):
