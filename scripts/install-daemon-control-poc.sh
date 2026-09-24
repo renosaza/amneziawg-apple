@@ -11,6 +11,7 @@ readonly daemon_path="$libexec_dir/amneziawg-daemon-control-poc"
 readonly backend_path="$libexec_dir/amneziawg-go-daemon-control-poc"
 readonly socket_dir=/private/var/db/amneziawg-daemon-control-poc
 readonly socket_path="$socket_dir/control.sock"
+readonly diagnostics_path="$socket_dir/diagnostics.jsonl"
 readonly plist_path="/Library/LaunchDaemons/$label.plist"
 stage_temp=
 plist_temp=
@@ -23,7 +24,7 @@ fail() {
 usage() {
     cat >&2 <<'EOF_USAGE'
 Usage:
-  sudo scripts/install-daemon-control-poc.sh install --daemon /absolute/daemon-control-poc --amneziawg-go /absolute/amneziawg-go --uid <console-uid> [--allow-route-plan-runtime [--allow-full-route-runtime] [--allow-route-plan-network-rebind]]
+  sudo scripts/install-daemon-control-poc.sh install --daemon /absolute/daemon-control-poc --amneziawg-go /absolute/amneziawg-go --uid <console-uid> [--allow-route-plan-runtime [--allow-full-route-runtime] [--allow-route-plan-network-rebind]] [--diagnostics [--diagnostics-endpoints]]
   sudo scripts/install-daemon-control-poc.sh status  --uid <console-uid>
   sudo scripts/install-daemon-control-poc.sh uninstall --uid <console-uid>
 
@@ -53,6 +54,8 @@ parse_sources() {
 	allow_route_plans=false
 	allow_full_routes=false
 	allow_network_rebind=false
+	allow_diagnostics=false
+	allow_diagnostics_endpoints=false
     while [[ $# -gt 0 ]]; do
         case $1 in
             --daemon) daemon_source=${2:-}; shift 2 ;;
@@ -61,12 +64,15 @@ parse_sources() {
 			--allow-route-plan-runtime) allow_route_plans=true; shift ;;
 			--allow-full-route-runtime) allow_full_routes=true; shift ;;
 			--allow-route-plan-network-rebind) allow_network_rebind=true; shift ;;
+			--diagnostics) allow_diagnostics=true; shift ;;
+			--diagnostics-endpoints) allow_diagnostics_endpoints=true; shift ;;
             *) usage ;;
         esac
     done
 	[[ -n ${daemon_source:-} && -n ${backend_source:-} && -n ${allowed_uid:-} ]] || usage
 	[[ $allow_full_routes == false || $allow_route_plans == true ]] || fail '--allow-full-route-runtime requires --allow-route-plan-runtime'
 	[[ $allow_network_rebind == false || $allow_route_plans == true ]] || fail '--allow-route-plan-network-rebind requires --allow-route-plan-runtime'
+	[[ $allow_diagnostics_endpoints == false || $allow_diagnostics == true ]] || fail '--diagnostics-endpoints requires --diagnostics'
 }
 
 parse_uid_only() {
@@ -228,6 +234,9 @@ write_plist() {
 	local route_plan_argument=
 	local full_route_argument=
 	local network_rebind_argument=
+	local diagnostics_argument=
+	local diagnostics_endpoint_argument=
+	local diagnostics_log_argument=
 	if [[ $allow_route_plans == true ]]; then
 		route_plan_argument='<string>-allow-route-plan-runtime</string>'
 	fi
@@ -236,6 +245,14 @@ write_plist() {
 	fi
 	if [[ $allow_network_rebind == true ]]; then
 		network_rebind_argument='<string>-allow-route-plan-network-rebind</string>'
+	fi
+	if [[ $allow_diagnostics == true ]]; then
+		diagnostics_argument='<string>-diagnostics</string>'
+		diagnostics_log_argument="<string>-diagnostics-log</string><string>$diagnostics_path</string>"
+		/usr/bin/install -o root -g wheel -m 0600 /dev/null "$diagnostics_path" || fail 'cannot create diagnostics log'
+	fi
+	if [[ $allow_diagnostics_endpoints == true ]]; then
+		diagnostics_endpoint_argument='<string>-diagnostics-endpoints</string>'
 	fi
     plist_temp=$(/usr/bin/mktemp "/Library/LaunchDaemons/.${label}.XXXXXX") || fail 'cannot stage launchd plist'
     cat > "$plist_temp" <<EOF_PLIST
@@ -251,6 +268,9 @@ write_plist() {
     $route_plan_argument
     $full_route_argument
     $network_rebind_argument
+	$diagnostics_argument
+	$diagnostics_endpoint_argument
+	$diagnostics_log_argument
   </array>
   <key>RunAtLoad</key><true/>
 </dict></plist>
@@ -295,6 +315,7 @@ rollback_fresh_install() {
         return 1
     fi
     /bin/rm -f "$plist_path" "$daemon_path" "$backend_path"
+    /bin/rm -f "$diagnostics_path"
     /bin/rmdir "$socket_dir" >/dev/null 2>&1 || true
 }
 
@@ -337,6 +358,7 @@ uninstall() {
     validate_installed
     stop_idle_service
     [[ ! -e $socket_path ]] || fail 'control socket remained; preserving installed files'
+    /bin/rm -f "$diagnostics_path"
     /bin/rmdir "$socket_dir" || fail 'socket directory is not empty; preserving installed files'
     /bin/rm "$plist_path" "$daemon_path" "$backend_path"
     printf 'daemon-control POC uninstalled: %s\n' "$label"
