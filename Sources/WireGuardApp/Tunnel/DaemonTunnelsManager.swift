@@ -8,6 +8,8 @@ final class DaemonTunnelsManager: TunnelsManager {
 
     private let store: DaemonProfileStore
     private let mutationQueue = DispatchQueue(label: "com.amneziawg.daemon-profile-mutations")
+    // Accessed only from mutationQueue. A successful stop is required before another start.
+    private var uncertainDaemonProfileIDs = Set<UUID>()
 
     private init(
         store: DaemonProfileStore,
@@ -237,12 +239,24 @@ final class DaemonTunnelsManager: TunnelsManager {
         tunnel.status = .activating
         mutationQueue.async { [weak self, weak tunnel] in
             guard let self, let tunnel else { return }
+            guard self.uncertainDaemonProfileIDs.isEmpty else {
+                DispatchQueue.main.async { [weak self, weak tunnel] in
+                    guard let self, let tunnel, self.tunnels.contains(tunnel) else { return }
+                    tunnel.status = .reasserting
+                    self.activationDelegate?.tunnelActivationAttemptFailed(
+                        tunnel: tunnel,
+                        error: .daemonModeStateUncertain
+                    )
+                }
+                return
+            }
             let client: DaemonControlClient
             let statuses: [DaemonControlProfileStatus]
             do {
                 client = try DaemonControlClient(socketPath: Self.controlSocketPath)
                 statuses = try client.list()
             } catch {
+                self.uncertainDaemonProfileIDs.insert(profileID)
                 DispatchQueue.main.async { [weak self, weak tunnel] in
                     guard let self, let tunnel, self.tunnels.contains(tunnel) else { return }
                     self.markDaemonStatusesDegraded()
@@ -259,6 +273,7 @@ final class DaemonTunnelsManager: TunnelsManager {
                 localProfiles: localProfiles,
                 excluding: profileID
             ) else {
+                self.uncertainDaemonProfileIDs.insert(profileID)
                 DispatchQueue.main.async { [weak self, weak tunnel] in
                     guard let self, let tunnel, self.tunnels.contains(tunnel) else { return }
                     self.markDaemonStatusesDegraded()
@@ -307,6 +322,9 @@ final class DaemonTunnelsManager: TunnelsManager {
             } catch {
                 let startError = error
                 let reconciliation = Self.reconcileFailedStart(profileID: profileID)
+                if !reconciliation.isCertain {
+                    self.uncertainDaemonProfileIDs.insert(profileID)
+                }
                 DispatchQueue.main.async { [weak self, weak tunnel] in
                     guard let self, let tunnel, self.tunnels.contains(tunnel) else { return }
                     tunnel.status = reconciliation.status
@@ -328,8 +346,10 @@ final class DaemonTunnelsManager: TunnelsManager {
         else { return }
         tunnel.status = .deactivating
         mutationQueue.async { [weak self, weak tunnel] in
+            guard let self else { return }
             do {
                 try DaemonControlClient(socketPath: Self.controlSocketPath).stop(profileID: profileID)
+                self.uncertainDaemonProfileIDs.remove(profileID)
                 DispatchQueue.main.async {
                     guard let self, let tunnel, self.tunnels.contains(tunnel) else { return }
                     tunnel.status = .inactive
