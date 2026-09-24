@@ -86,6 +86,9 @@ func TestSyntheticPhysicalEndpointOwnership(t *testing.T) {
 	}) {
 		t.Fatal("did not recognize owned endpoint route without RIB interface metadata")
 	}
+	if !configured.ownsKnownHostRoute(&ribOwned) {
+		t.Fatal("did not retain owned endpoint route after uplink disappeared")
+	}
 	lookup := effectiveRouteLookupAddrs(configured.target)
 	if _, ok := lookup[syscall.RTAX_IFP].(*route.LinkAddr); !ok || lookup[syscall.RTAX_NETMASK] != nil {
 		t.Fatal("effective lookup did not request only destination and interface metadata")
@@ -331,6 +334,52 @@ func TestSyntheticPhysicalEndpointRetainsUnknownAddOutcome(t *testing.T) {
 	configured.recordRouteWrite(syscall.RTM_ADD, syscall.EEXIST)
 	if configured.routeSet {
 		t.Fatal("retained route recovery state after a kernel-rejected add")
+	}
+}
+
+func TestEndpointRebindDecisionFailsClosed(t *testing.T) {
+	current := physicalBaseRoute{prefix: netip.MustParsePrefix("192.0.2.0/24"), gateway: netip.MustParseAddr("192.0.2.1"), iface: &net.Interface{Index: 7, Name: "en0"}}
+	unchanged, err := endpointRebindDecisionFor(current, current)
+	if err != nil || unchanged != endpointRebindUnchanged {
+		t.Fatalf("unchanged decision = %d, %v", unchanged, err)
+	}
+	changed := physicalBaseRoute{prefix: netip.MustParsePrefix("198.51.100.0/24"), gateway: netip.MustParseAddr("198.51.100.1"), iface: &net.Interface{Index: 8, Name: "en1"}}
+	decision, err := endpointRebindDecisionFor(current, changed)
+	if err != nil || decision != endpointRebindChange {
+		t.Fatalf("changed decision = %d, %v", decision, err)
+	}
+	for _, invalid := range []physicalBaseRoute{
+		{prefix: current.prefix, gateway: current.gateway, iface: &net.Interface{Index: 9, Name: "utun9"}},
+		{prefix: current.prefix, gateway: current.gateway, iface: nil},
+	} {
+		if _, err := endpointRebindDecisionFor(current, invalid); err == nil {
+			t.Fatal("accepted ambiguous or unavailable replacement route")
+		}
+	}
+}
+
+func TestEndpointRebindRouteWriteUsesReplacementOnly(t *testing.T) {
+	configured := &PhysicalEndpointRoute{target: netip.MustParseAddr("203.0.113.10")}
+	next := physicalBaseRoute{prefix: netip.MustParsePrefix("198.51.100.0/24"), gateway: netip.MustParseAddr("198.51.100.1"), iface: &net.Interface{Index: 8, Name: "en1"}}
+	addrs := configured.routeAddrsFor(next)
+	if gateway, ok := addrs[syscall.RTAX_GATEWAY].(*route.Inet4Addr); !ok || gateway.IP != next.gateway.As4() {
+		t.Fatal("replacement gateway was not used")
+	}
+	if iface, ok := addrs[syscall.RTAX_IFP].(*route.LinkAddr); !ok || iface.Index != next.iface.Index || iface.Name != next.iface.Name {
+		t.Fatal("replacement interface was not used")
+	}
+}
+
+func TestEndpointRebindRetainsActualNewOwnershipOnUncertainReply(t *testing.T) {
+	current := physicalBaseRoute{prefix: netip.MustParsePrefix("192.0.2.0/24"), gateway: netip.MustParseAddr("192.0.2.1"), iface: &net.Interface{Index: 7, Name: "en0"}}
+	next := physicalBaseRoute{prefix: netip.MustParsePrefix("198.51.100.0/24"), gateway: netip.MustParseAddr("198.51.100.1"), iface: &net.Interface{Index: 8, Name: "en1"}}
+	actual, err := resolvedRebindBase(current, next, true, false)
+	if err != nil || !samePhysicalBaseRoute(actual, next) {
+		t.Fatalf("new ownership was not retained: %#v %v", actual, err)
+	}
+	actual, err = resolvedRebindBase(current, next, false, true)
+	if err == nil || !samePhysicalBaseRoute(actual, current) {
+		t.Fatalf("old ownership was not retained: %#v %v", actual, err)
 	}
 }
 

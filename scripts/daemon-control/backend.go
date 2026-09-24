@@ -26,6 +26,12 @@ type capabilityBackend interface {
 	capabilities() []string
 }
 
+// rebindBackend is deliberately daemon-internal: the unprivileged control
+// protocol cannot cause routing mutations after a session starts.
+type rebindBackend interface {
+	Rebind(Session) error
+}
+
 type memoryBackend struct{}
 
 func (memoryBackend) Start(string) (Session, error) { return Session{}, nil }

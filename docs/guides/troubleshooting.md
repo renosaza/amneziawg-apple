@@ -15,7 +15,13 @@ This has been observed with Command Line Tools only. Install/select complete Xco
 ## The network changes while an experimental daemon session is active
 
 The opt-in daemon records the physical gateway and interface at start; it does
-not rebind an active endpoint host route after Wi-Fi, Ethernet, sleep, or wake
-changes. Stop the session and start it again after the new network is stable.
-Do not rely on its existing endpoint route until automatic rebinding has been
-implemented and runtime-validated.
+not rebind an active endpoint host route by default after Wi-Fi, Ethernet,
+sleep, or wake changes. Stop the session and start it again after the new
+network is stable.
+
+`--allow-route-plan-network-rebind` is a separate root-controlled experiment
+for constrained route-plan sessions. It may change only the daemon-owned
+endpoint `/32` in place after a physical-RIB check; failed or unclear changes
+mark that session degraded. It has not passed the Wi-Fi, Ethernet, and
+sleep/wake runtime matrix. Do not rely on it for a corporate endpoint until
+that matrix is recorded as passed.

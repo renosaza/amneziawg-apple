@@ -23,7 +23,7 @@ fail() {
 usage() {
     cat >&2 <<'EOF_USAGE'
 Usage:
-  sudo scripts/install-daemon-control-poc.sh install --daemon /absolute/daemon-control-poc --amneziawg-go /absolute/amneziawg-go --uid <console-uid> [--allow-route-plan-runtime [--allow-full-route-runtime]]
+  sudo scripts/install-daemon-control-poc.sh install --daemon /absolute/daemon-control-poc --amneziawg-go /absolute/amneziawg-go --uid <console-uid> [--allow-route-plan-runtime [--allow-full-route-runtime] [--allow-route-plan-network-rebind]]
   sudo scripts/install-daemon-control-poc.sh status  --uid <console-uid>
   sudo scripts/install-daemon-control-poc.sh uninstall --uid <console-uid>
 
@@ -52,6 +52,7 @@ parse_uid() {
 parse_sources() {
 	allow_route_plans=false
 	allow_full_routes=false
+	allow_network_rebind=false
     while [[ $# -gt 0 ]]; do
         case $1 in
             --daemon) daemon_source=${2:-}; shift 2 ;;
@@ -59,11 +60,13 @@ parse_sources() {
             --uid) parse_uid "${2:-}"; shift 2 ;;
 			--allow-route-plan-runtime) allow_route_plans=true; shift ;;
 			--allow-full-route-runtime) allow_full_routes=true; shift ;;
+			--allow-route-plan-network-rebind) allow_network_rebind=true; shift ;;
             *) usage ;;
         esac
     done
 	[[ -n ${daemon_source:-} && -n ${backend_source:-} && -n ${allowed_uid:-} ]] || usage
 	[[ $allow_full_routes == false || $allow_route_plans == true ]] || fail '--allow-full-route-runtime requires --allow-route-plan-runtime'
+	[[ $allow_network_rebind == false || $allow_route_plans == true ]] || fail '--allow-route-plan-network-rebind requires --allow-route-plan-runtime'
 }
 
 parse_uid_only() {
@@ -224,11 +227,15 @@ stage_binary() {
 write_plist() {
 	local route_plan_argument=
 	local full_route_argument=
+	local network_rebind_argument=
 	if [[ $allow_route_plans == true ]]; then
 		route_plan_argument='<string>-allow-route-plan-runtime</string>'
 	fi
 	if [[ $allow_full_routes == true ]]; then
 		full_route_argument='<string>-allow-full-route-runtime</string>'
+	fi
+	if [[ $allow_network_rebind == true ]]; then
+		network_rebind_argument='<string>-allow-route-plan-network-rebind</string>'
 	fi
     plist_temp=$(/usr/bin/mktemp "/Library/LaunchDaemons/.${label}.XXXXXX") || fail 'cannot stage launchd plist'
     cat > "$plist_temp" <<EOF_PLIST
@@ -243,6 +250,7 @@ write_plist() {
     <string>-binary</string><string>$backend_path</string>
     $route_plan_argument
     $full_route_argument
+    $network_rebind_argument
   </array>
   <key>RunAtLoad</key><true/>
 </dict></plist>

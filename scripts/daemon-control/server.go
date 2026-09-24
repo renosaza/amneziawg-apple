@@ -255,6 +255,25 @@ func (server *Server) start(request request) (Session, error) {
 	return backend.StartWithRoutePlan(request.Config, plan)
 }
 
+// Rebind asks the optional root-owned backend to refresh each active session's
+// physical endpoint route. Holding the lifecycle lock serializes it with IPC
+// start/stop operations; one failed session never prevents its siblings.
+func (server *Server) Rebind() error {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	backend, ok := server.backend.(rebindBackend)
+	if !ok || server.closed {
+		return nil
+	}
+	var problems []error
+	for _, session := range server.profiles {
+		if err := backend.Rebind(session); err != nil {
+			problems = append(problems, err)
+		}
+	}
+	return errors.Join(problems...)
+}
+
 // Close prevents new operations and stops every child owned by this server.
 func (server *Server) Close() error {
 	server.closeMu.Lock()

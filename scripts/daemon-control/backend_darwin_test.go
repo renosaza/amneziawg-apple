@@ -6,6 +6,7 @@ package daemoncontrol
 
 import (
 	"encoding/json"
+	"net/netip"
 	"reflect"
 	"strings"
 	"testing"
@@ -50,5 +51,31 @@ func TestTunnelBackendDefaultsToNoSyntheticRoutes(t *testing.T) {
 	backend := &tunnelBackend{}
 	if backend.syntheticIPv4Routes || backend.syntheticEndpointRoutes || backend.syntheticFallbackRoute {
 		t.Fatal("normal daemon backend enabled synthetic route binding")
+	}
+}
+
+func TestPlannedPeerEndpointResetRetainsOnlyPublicPeerAndLiteralEndpoint(t *testing.T) {
+	key := strings.Repeat("a", 64)
+	config := "private_key=" + strings.Repeat("b", 64) + "\npublic_key=" + key + "\nendpoint=203.0.113.10:51820"
+	publicKey, endpoint, err := plannedPeerEndpointReset(config, netip.MustParseAddr("203.0.113.10"))
+	if err != nil || publicKey != key || endpoint != "203.0.113.10:51820" {
+		t.Fatalf("reset fields=%q %q err=%v", publicKey, endpoint, err)
+	}
+	if _, _, err := plannedPeerEndpointReset(config, netip.MustParseAddr("203.0.113.11")); err == nil {
+		t.Fatal("accepted an endpoint that differs from the route plan")
+	}
+}
+
+func TestEndpointRefreshRemainsPendingUntilUAPISucceeds(t *testing.T) {
+	process := &tunnelProcess{endpointRefreshPending: true}
+	if !process.needsEndpointRefresh(false) {
+		t.Fatal("failed endpoint refresh was discarded")
+	}
+	process.endpointRefreshPending = false
+	if process.needsEndpointRefresh(false) {
+		t.Fatal("successful endpoint refresh remained pending")
+	}
+	if !process.needsEndpointRefresh(true) {
+		t.Fatal("changed endpoint did not request refresh")
 	}
 }
