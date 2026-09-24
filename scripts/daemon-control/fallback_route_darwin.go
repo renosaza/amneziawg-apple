@@ -94,7 +94,7 @@ func hasForeignMoreSpecificRoute(messages []route.Message, planned netip.Prefix,
 			continue
 		}
 		prefix, ok := routePrefix(message)
-		if ok && (endpoint == nil || !endpoint.ownsRoute(message)) && message.Flags&syscall.RTF_UP != 0 && planned.Contains(prefix.Addr()) && prefix.Bits() > planned.Bits() {
+		if ok && (endpoint == nil || !endpoint.ownsRIBRoute(message)) && message.Flags&syscall.RTF_UP != 0 && planned.Contains(prefix.Addr()) && prefix.Bits() > planned.Bits() {
 			return true
 		}
 	}
