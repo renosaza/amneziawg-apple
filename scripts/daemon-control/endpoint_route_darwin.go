@@ -385,25 +385,11 @@ func (configured *PhysicalEndpointRoute) matchesBaseRouteWithInterfaceByIndex(me
 	return ok && prefix == configured.basePrefix && matchesRIBPhysicalRoute(message, configured.gateway, configured.iface, interfaceByIndex)
 }
 
-// matchesRIBPhysicalRoute accepts complete RIB metadata, or Darwin's observed
-// nil RTAX_IFP form only after resolving the recorded physical interface again.
+// matchesRIBPhysicalRoute resolves the live interface for every RIB form,
+// including Darwin's observed nil RTAX_IFP form.
 func matchesRIBPhysicalRoute(message *route.RouteMessage, gateway netip.Addr, iface *net.Interface, interfaceByIndex func(int) (*net.Interface, error)) bool {
-	if message == nil {
-		return false
-	}
-	if routeAddress(message, syscall.RTAX_IFP) != nil {
-		actualGateway, index, name, err := physicalRouteMetadata(message)
-		return err == nil && actualGateway == gateway && iface != nil && index == iface.Index && name == iface.Name
-	}
-	if iface == nil || interfaceByIndex == nil || message.Index <= 0 || message.Index != iface.Index || message.Flags&(syscall.RTF_UP|syscall.RTF_GATEWAY) != syscall.RTF_UP|syscall.RTF_GATEWAY {
-		return false
-	}
-	actualGateway, gatewayOK := routeAddress(message, syscall.RTAX_GATEWAY).(*route.Inet4Addr)
-	if !gatewayOK || netip.AddrFrom4(actualGateway.IP) != gateway {
-		return false
-	}
-	actualInterface, err := interfaceByIndex(message.Index)
-	return err == nil && actualInterface != nil && actualInterface.Index == iface.Index && actualInterface.Name == iface.Name && actualInterface.Flags&net.FlagLoopback == 0 && !utunName.MatchString(actualInterface.Name)
+	actualGateway, actualInterface, err := physicalRIBRouteMetadata(message, interfaceByIndex)
+	return err == nil && iface != nil && actualGateway == gateway && actualInterface.Index == iface.Index && actualInterface.Name == iface.Name
 }
 
 func (configured *PhysicalEndpointRoute) routeAddrs() []route.Addr {

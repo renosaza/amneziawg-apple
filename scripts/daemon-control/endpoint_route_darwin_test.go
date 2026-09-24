@@ -116,24 +116,36 @@ func TestSyntheticPhysicalEndpointReadsGatewayAndInterface(t *testing.T) {
 
 func TestPlannedEndpointBaseRouteIdentity(t *testing.T) {
 	configured := &PhysicalEndpointRoute{basePrefix: netip.MustParsePrefix("192.0.2.0/24"), gateway: netip.MustParseAddr("192.0.2.1"), iface: &net.Interface{Index: 7, Name: "en0"}}
+	lookup := func(index int) (*net.Interface, error) {
+		if index != configured.iface.Index {
+			return nil, net.ErrClosed
+		}
+		return configured.iface, nil
+	}
 	message := physicalRouteMessage(7, syscall.RTF_UP|syscall.RTF_GATEWAY, [4]byte{192, 0, 2, 0}, [4]byte{192, 0, 2, 1}, "en0")
 	message.Addrs[syscall.RTAX_NETMASK] = &route.Inet4Addr{IP: [4]byte{255, 255, 255, 0}}
-	if !configured.matchesBaseRoute(message) {
+	if !configured.matchesBaseRouteWithInterfaceByIndex(message, lookup) {
 		t.Fatal("did not match base route")
 	}
 	message.Index = 8
-	if configured.matchesBaseRoute(message) {
+	if configured.matchesBaseRouteWithInterfaceByIndex(message, lookup) {
 		t.Fatal("accepted changed base route")
 	}
 	message.Index = 7
 	message.Addrs[syscall.RTAX_IFP] = &route.LinkAddr{Index: 8, Name: "en1"}
-	if configured.matchesBaseRoute(message) {
+	if configured.matchesBaseRouteWithInterfaceByIndex(message, lookup) {
 		t.Fatal("accepted changed interface metadata")
 	}
 	message.Addrs[syscall.RTAX_IFP] = &route.LinkAddr{Index: 7, Name: "en0"}
 	message.Flags &^= syscall.RTF_GATEWAY
-	if configured.matchesBaseRoute(message) {
+	if configured.matchesBaseRouteWithInterfaceByIndex(message, lookup) {
 		t.Fatal("accepted non-gateway base route")
+	}
+	message.Flags |= syscall.RTF_GATEWAY
+	if configured.matchesBaseRouteWithInterfaceByIndex(message, func(int) (*net.Interface, error) {
+		return &net.Interface{Index: 7, Name: "utun7"}, nil
+	}) {
+		t.Fatal("accepted RTAX_IFP metadata after the live interface became utun")
 	}
 }
 
@@ -142,7 +154,7 @@ func TestPlannedEndpointRIBBaseRouteWithoutIFP(t *testing.T) {
 	iface := &net.Interface{Index: 7, Name: "en0"}
 	lookup := func(index int) (*net.Interface, error) {
 		if index != iface.Index {
-			t.Fatalf("lookup index = %d", index)
+			return nil, net.ErrClosed
 		}
 		return iface, nil
 	}
@@ -200,19 +212,25 @@ func TestSelectPlannedEndpointBaseRoute(t *testing.T) {
 	base.Addrs[syscall.RTAX_NETMASK] = &route.Inet4Addr{IP: [4]byte{0, 0, 0, 0}}
 	lan := physicalRouteMessage(7, syscall.RTF_UP|syscall.RTF_GATEWAY, [4]byte{192, 0, 2, 0}, gateway.As4(), "en0")
 	lan.Addrs[syscall.RTAX_NETMASK] = &route.Inet4Addr{IP: [4]byte{255, 255, 255, 0}}
-	selected, err := selectBaseRoute([]route.Message{base, lan}, target, gateway, iface)
+	lookup := func(index int) (*net.Interface, error) {
+		if index != iface.Index {
+			return nil, net.ErrClosed
+		}
+		return iface, nil
+	}
+	selected, err := selectBaseRouteWithInterfaceByIndex([]route.Message{base, lan}, target, gateway, iface, lookup)
 	if err != nil || selected != netip.MustParsePrefix("192.0.2.0/24") {
 		t.Fatalf("selected=%v err=%v", selected, err)
 	}
 	wrong := physicalRouteMessage(8, syscall.RTF_UP|syscall.RTF_GATEWAY, [4]byte{192, 0, 2, 0}, gateway.As4(), "en1")
 	wrong.Addrs[syscall.RTAX_NETMASK] = lan.Addrs[syscall.RTAX_NETMASK]
-	if _, err := selectBaseRoute([]route.Message{wrong}, target, gateway, iface); err == nil {
+	if _, err := selectBaseRouteWithInterfaceByIndex([]route.Message{wrong}, target, gateway, iface, lookup); err == nil {
 		t.Fatal("accepted mismatched interface")
 	}
-	if _, err := selectBaseRoute([]route.Message{lan, lan}, target, gateway, iface); err == nil {
+	if _, err := selectBaseRouteWithInterfaceByIndex([]route.Message{lan, lan}, target, gateway, iface, lookup); err == nil {
 		t.Fatal("accepted ambiguous route")
 	}
-	if _, err := selectBaseRoute(nil, target, gateway, iface); err == nil {
+	if _, err := selectBaseRouteWithInterfaceByIndex(nil, target, gateway, iface, lookup); err == nil {
 		t.Fatal("accepted missing route")
 	}
 }
