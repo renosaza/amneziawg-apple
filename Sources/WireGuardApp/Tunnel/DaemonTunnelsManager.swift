@@ -499,7 +499,7 @@ final class DaemonTunnelsManager: TunnelsManager {
     private static func isIPv4FullTunnel(_ configuration: TunnelConfiguration) -> Bool {
         configuration.peers.contains { peer in
             peer.allowedIPs.contains { allowedIP in
-                allowedIP.address is IPv4Address && allowedIP.networkPrefixLength == 0
+                allowedIP.address.rawValue.count == 4 && allowedIP.networkPrefixLength == 0
             }
         }
     }
