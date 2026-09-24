@@ -23,10 +23,14 @@ for configuration in ('7A0000162F00000100000001', '7A0000172F00000100000001'):
     assert 'DAEMON_MODE' in block
 PY
 
-if grep -Eq 'NETunnelProviderManager|sendProviderMessage|DaemonControlClient.*\.start|DaemonControlClient.*\.stop' "$manager"; then
-    echo 'daemon GUI manager must not use Network Extension or daemon lifecycle' >&2
+if grep -Eq 'NETunnelProviderManager|sendProviderMessage' "$manager"; then
+    echo 'daemon GUI manager must not use Network Extension' >&2
     exit 1
 fi
+# Decision 0017 permits only this bounded daemon-control lifecycle surface.
+grep -Eq 'MacOSDaemonRoutePlan\.buildSingleIPv4Split' "$manager"
+grep -Eq 'client\.start\(' "$manager"
+grep -Eq 'DaemonControlClient\(socketPath: Self\.controlSocketPath\)\.stop\(' "$manager"
 grep -Eq 'DaemonControlClient\(socketPath: controlSocketPath\)\.list\(\)' "$manager"
 grep -Eq -- '--daemon-self-check' "$repo_dir/Sources/WireGuardApp/UI/macOS/AppDelegate.swift"
 grep -Eq 'store\.save\(' "$manager"
