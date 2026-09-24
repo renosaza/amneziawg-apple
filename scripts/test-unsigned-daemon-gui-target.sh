@@ -70,6 +70,8 @@ grep -Fxq 'SPARKLE_FEED_URL =' "$developer_config"
 grep -Fxq 'SPARKLE_PUBLIC_ED_KEY =' "$developer_config"
 grep -Fq 'INFOPLIST_KEY_SUFeedURL="$sparkle_feed_url"' "$repo_dir/scripts/package-unsigned-macos-daemon.sh"
 grep -Fq 'INFOPLIST_KEY_SUPublicEDKey="$sparkle_public_ed_key"' "$repo_dir/scripts/package-unsigned-macos-daemon.sh"
+grep -Fq 'info["SUFeedURL"] = os.environ["SPARKLE_FEED_URL"]' "$repo_dir/scripts/package-unsigned-macos-daemon.sh"
+grep -Fq 'info["SUPublicEDKey"] = os.environ["SPARKLE_PUBLIC_ED_KEY"]' "$repo_dir/scripts/package-unsigned-macos-daemon.sh"
 
 grep -Fq 'url.scheme?.lowercased() == "https"' "$updater"
 grep -Fq 'Data(base64Encoded: publicKey)?.count == 32' "$updater"
