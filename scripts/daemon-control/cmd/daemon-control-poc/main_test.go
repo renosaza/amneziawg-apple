@@ -5,6 +5,7 @@ package main
 import (
 	"encoding/json"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"testing"
@@ -193,5 +194,91 @@ func TestManualRoutePlanAssertProfiles(t *testing.T) {
 	}()
 	if err := daemonManualRoutePlanAssertProfiles(path, manualRoutePlanProfileIDThree, manualRoutePlanProfileID); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestManualFullRoutePlanIsFixedAndExcludesSyntheticRoutes(t *testing.T) {
+	var plan struct {
+		LocalAddress string `json:"local_address"`
+		Routes       []struct {
+			Destination string `json:"destination"`
+			Owner       string `json:"owner"`
+		} `json:"routes"`
+	}
+	if err := json.Unmarshal(manualFullRoutePlanRequest.RoutePlan, &plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.LocalAddress != "192.0.2.6/32" || len(plan.Routes) == 0 {
+		t.Fatalf("unexpected fixed full plan: %#v", plan)
+	}
+	if frame, err := json.Marshal(manualFullRoutePlanRequest); err != nil || len(frame) > maxFrameBytes {
+		t.Fatalf("full-route frame is not bounded: len=%d err=%v", len(frame), err)
+	}
+	for _, address := range []string{"203.0.113.1", "203.0.113.10", "192.0.2.200", "198.51.100.20"} {
+		parsed := netip.MustParseAddr(address)
+		contained := false
+		for _, route := range plan.Routes {
+			if route.Owner != "tunnel" {
+				continue
+			}
+			if netip.MustParsePrefix(route.Destination).Contains(parsed) {
+				contained = true
+			}
+		}
+		switch address {
+		case "203.0.113.1":
+			if !contained {
+				t.Fatalf("full route lost %s", address)
+			}
+		default:
+			if contained {
+				t.Fatalf("full route captured excluded %s", address)
+			}
+		}
+	}
+}
+
+func TestManualFullRoutePlanStartAndStopAreFixed(t *testing.T) {
+	path := shortSocketPath(t)
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	requests := make(chan map[string]any, 4)
+	go func() {
+		for _, response := range []string{
+			`{"ok":true,"protocol_version":1}`,
+			`{"ok":true,"profile":{"id":"44444444-5555-4666-8777-888888888888","status":"running"}}`,
+			`{"ok":true,"protocol_version":1}`,
+			`{"ok":true,"profile":{"id":"44444444-5555-4666-8777-888888888888","status":"stopped"}}`,
+		} {
+			connection, err := listener.AcceptUnix()
+			if err != nil {
+				return
+			}
+			frame, err := readFrame(connection)
+			if err == nil {
+				var request map[string]any
+				if json.Unmarshal(frame, &request) == nil {
+					requests <- request
+				}
+			}
+			_ = writeFrame(connection, []byte(response))
+			_ = connection.Close()
+		}
+	}()
+	if err := daemonManualRoutePlanStartRequest(path, manualFullRoutePlanRequest); err != nil {
+		t.Fatal(err)
+	}
+	if err := daemonManualRoutePlanStopRequest(path, manualFullRoutePlanProfileID); err != nil {
+		t.Fatal(err)
+	}
+	helloStart, start, helloStop, stop := <-requests, <-requests, <-requests, <-requests
+	if helloStart["operation"] != "hello" || start["operation"] != "start" || start["profile_id"] != manualFullRoutePlanProfileID {
+		t.Fatalf("unexpected full-route start: %#v %#v", helloStart, start)
+	}
+	if helloStop["operation"] != "hello" || stop["operation"] != "stop" || stop["profile_id"] != manualFullRoutePlanProfileID {
+		t.Fatalf("unexpected full-route stop: %#v %#v", helloStop, stop)
 	}
 }
