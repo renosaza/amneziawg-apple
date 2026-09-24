@@ -167,17 +167,19 @@ func (server *Server) apply(request request) response {
 		if err := validRoutePlanMatchesConfig(request.RoutePlan, request.Config); err != nil {
 			return response{Error: "invalid_request"}
 		}
+		if request.RoutePlan != nil {
+			server.plannedID = request.ProfileID
+		}
 		session, err := server.start(request)
 		if err != nil {
 			if session.value != nil {
 				server.profiles[request.ProfileID] = session
+			} else if request.RoutePlan != nil {
+				server.plannedID = ""
 			}
 			return response{Error: "start_failed"}
 		}
 		server.profiles[request.ProfileID] = session
-		if request.RoutePlan != nil {
-			server.plannedID = request.ProfileID
-		}
 		return response{OK: true, Profile: &Profile{ID: request.ProfileID, Status: "running"}}
 	case "stop":
 		session, found := server.profiles[request.ProfileID]
