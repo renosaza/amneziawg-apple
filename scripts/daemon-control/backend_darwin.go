@@ -24,12 +24,12 @@ const tunnelStatePrefix = "amneziawg-daemon."
 
 var utunName = regexp.MustCompile(`^utun[0-9]+$`)
 
-type syntheticIPv4RouteSpec struct{ local, peer, target string }
+type syntheticIPv4RouteSpec struct{ local, target string }
 
 var syntheticIPv4RouteSpecs = [...]syntheticIPv4RouteSpec{
-	{local: "192.0.2.2", peer: "192.0.2.1", target: "192.0.2.10"},
-	{local: "192.0.2.4", peer: "192.0.2.3", target: "192.0.2.11"},
-	{local: "192.0.2.6", peer: "192.0.2.5", target: "192.0.2.12"},
+	{local: "192.0.2.2", target: "192.0.2.10"},
+	{local: "192.0.2.4", target: "192.0.2.11"},
+	{local: "192.0.2.6", target: "192.0.2.12"},
 }
 
 var syntheticEndpointRouteTargets = [...]string{"203.0.113.10", "203.0.113.11", "203.0.113.12"}
@@ -259,7 +259,7 @@ func (backend *tunnelBackend) configureSyntheticIPv4Route(process *tunnelProcess
 		backend.routeSlots[index] = true
 		process.routeSlot = index
 		spec := syntheticIPv4RouteSpecs[index]
-		route, err := configureSyntheticIPv4Route(process, spec.local, spec.peer, spec.target)
+		route, err := configureSyntheticIPv4Route(process, spec.local, spec.target)
 		process.route = route
 		return err
 	}

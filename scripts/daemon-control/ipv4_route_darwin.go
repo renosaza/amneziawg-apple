@@ -72,12 +72,25 @@ static int address_preflight(const char *local) {
 	return state;
 }
 
-static int address_ownership(const char *name, const char *local, const char *peer) {
+static void synthetic_broadaddr(struct in_addr *result, const struct in_addr *address) {
+	struct in_addr mask;
+	memset(&mask, 0xff, sizeof(mask));
+	result->s_addr = address->s_addr | ~mask.s_addr;
+}
+
+static int synthetic_broadaddr_matches_local(const char *local) {
+	struct in_addr address, broadaddr;
+	if (inet_pton(AF_INET, local, &address) != 1) return 0;
+	synthetic_broadaddr(&broadaddr, &address);
+	return memcmp(&address, &broadaddr, sizeof(address)) == 0;
+}
+
+static int address_ownership(const char *name, const char *local) {
 	struct ifaddrs *interfaces = NULL, *item;
-	struct in_addr wanted_local, wanted_peer;
+	struct in_addr wanted_local, wanted_broadaddr;
 	int state = ADDRESS_STATE_ABSENT;
-	if (inet_pton(AF_INET, local, &wanted_local) != 1 ||
-	    inet_pton(AF_INET, peer, &wanted_peer) != 1) return ADDRESS_STATE_ERROR;
+	if (inet_pton(AF_INET, local, &wanted_local) != 1) return ADDRESS_STATE_ERROR;
+	synthetic_broadaddr(&wanted_broadaddr, &wanted_local);
 	if (getifaddrs(&interfaces) != 0) return ADDRESS_STATE_ERROR;
 	for (item = interfaces; item != NULL; item = item->ifa_next) {
 		struct sockaddr_in *address, *destination;
@@ -90,7 +103,7 @@ static int address_ownership(const char *name, const char *local, const char *pe
 			break;
 		}
 		destination = (struct sockaddr_in *)item->ifa_dstaddr;
-		if (memcmp(&destination->sin_addr, &wanted_peer, sizeof(wanted_peer)) != 0) {
+		if (memcmp(&destination->sin_addr, &wanted_broadaddr, sizeof(wanted_broadaddr)) != 0) {
 			state = ADDRESS_STATE_CONFLICT;
 			break;
 		}
@@ -100,7 +113,7 @@ static int address_ownership(const char *name, const char *local, const char *pe
 	return state;
 }
 
-static int set_address(const char *name, const char *local, const char *peer) {
+static int set_synthetic_address(const char *name, const char *local) {
 	struct ifaliasreq request = {0};
 	struct sockaddr_in *addr = (struct sockaddr_in *)&request.ifra_addr;
 	struct sockaddr_in *broadaddr = (struct sockaddr_in *)&request.ifra_broadaddr;
@@ -110,10 +123,10 @@ static int set_address(const char *name, const char *local, const char *peer) {
 	addr->sin_len = sizeof(*addr); addr->sin_family = AF_INET;
 	broadaddr->sin_len = sizeof(*broadaddr); broadaddr->sin_family = AF_INET;
 	mask->sin_len = sizeof(*mask); mask->sin_family = AF_INET;
-	if (inet_pton(AF_INET, local, &addr->sin_addr) != 1 ||
-	    inet_pton(AF_INET, peer, &broadaddr->sin_addr) != 1 ||
-	    inet_pton(AF_INET, "255.255.255.255", &mask->sin_addr) != 1)
+	if (inet_pton(AF_INET, local, &addr->sin_addr) != 1)
 		return -1;
+	memset(&mask->sin_addr, 0xff, sizeof(mask->sin_addr));
+	synthetic_broadaddr(&broadaddr->sin_addr, &addr->sin_addr);
 	fd = socket(AF_INET, SOCK_DGRAM, 0);
 	if (fd == -1) return -1;
 	result = ioctl(fd, SIOCAIFADDR, &request);
@@ -154,7 +167,7 @@ import (
 
 // IPv4Route owns one synthetic address and one /32 route on one utun.
 type IPv4Route struct {
-	name, local, peer    string
+	name, local          string
 	target               netip.Addr
 	iface                *net.Interface
 	addressSet, routeSet bool
@@ -174,11 +187,17 @@ var (
 	addressStateOwned     = int(C.ADDRESS_STATE_OWNED)
 )
 
-func configureSyntheticIPv4Route(process *tunnelProcess, localText, peerText, targetText string) (*IPv4Route, error) {
+func syntheticBroadaddrMatchesLocal(local string) bool {
+	cLocal := C.CString(local)
+	defer C.free(unsafe.Pointer(cLocal))
+	return C.synthetic_broadaddr_matches_local(cLocal) == 1
+}
+
+func configureSyntheticIPv4Route(process *tunnelProcess, localText, targetText string) (*IPv4Route, error) {
 	if process == nil || os.Geteuid() != 0 || !utunName.MatchString(process.name) {
 		return nil, errors.New("synthetic IPv4 route requires root and a utun")
 	}
-	local, peer, target, err := ipv4(localText, peerText, targetText)
+	local, target, err := syntheticIPv4(localText, targetText)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +205,7 @@ func configureSyntheticIPv4Route(process *tunnelProcess, localText, peerText, ta
 	if err != nil {
 		return nil, err
 	}
-	configured := &IPv4Route{name: process.name, local: local.String(), peer: peer.String(), target: target, iface: iface}
+	configured := &IPv4Route{name: process.name, local: local.String(), target: target, iface: iface}
 	if existing, err := configured.requestRouteLookup(); err == nil && existing.Err == nil && configured.isTargetHostRoute(existing) {
 		return nil, errors.New("refusing to replace an existing route")
 	}
@@ -198,11 +217,10 @@ func configureSyntheticIPv4Route(process *tunnelProcess, localText, peerText, ta
 		return nil, err
 	}
 	configured.initialFlags = flags
-	cName, cLocal, cPeer := C.CString(process.name), C.CString(local.String()), C.CString(peer.String())
+	cName, cLocal := C.CString(process.name), C.CString(local.String())
 	defer C.free(unsafe.Pointer(cName))
 	defer C.free(unsafe.Pointer(cLocal))
-	defer C.free(unsafe.Pointer(cPeer))
-	if C.set_address(cName, cLocal, cPeer) != 0 {
+	if C.set_synthetic_address(cName, cLocal) != 0 {
 		return nil, errors.New("set synthetic IPv4 address")
 	}
 	configured.addressSet = true
@@ -221,19 +239,19 @@ func configureSyntheticIPv4Route(process *tunnelProcess, localText, peerText, ta
 	return configured, nil
 }
 
-func ipv4(values ...string) (netip.Addr, netip.Addr, netip.Addr, error) {
-	var result [3]netip.Addr
-	for index, value := range values {
+func syntheticIPv4(localText, targetText string) (netip.Addr, netip.Addr, error) {
+	var result [2]netip.Addr
+	for index, value := range [...]string{localText, targetText} {
 		address, err := netip.ParseAddr(value)
 		if err != nil || !address.Is4() || !syntheticIPv4Prefix.Contains(address) {
-			return netip.Addr{}, netip.Addr{}, netip.Addr{}, errors.New("synthetic address must be TEST-NET IPv4")
+			return netip.Addr{}, netip.Addr{}, errors.New("synthetic address must be TEST-NET IPv4")
 		}
 		result[index] = address
 	}
-	if result[0] == result[1] || result[0] == result[2] || result[1] == result[2] {
-		return netip.Addr{}, netip.Addr{}, netip.Addr{}, errors.New("synthetic addresses must differ")
+	if result[0] == result[1] {
+		return netip.Addr{}, netip.Addr{}, errors.New("synthetic addresses must differ")
 	}
-	return result[0], result[1], result[2], nil
+	return result[0], result[1], nil
 }
 
 func (configured *IPv4Route) add() error { return configured.write(syscall.RTM_ADD) }
@@ -278,11 +296,10 @@ func (configured *IPv4Route) preflightAddress() error {
 }
 
 func (configured *IPv4Route) requireOwnedAddress() error {
-	cName, cLocal, cPeer := C.CString(configured.name), C.CString(configured.local), C.CString(configured.peer)
+	cName, cLocal := C.CString(configured.name), C.CString(configured.local)
 	defer C.free(unsafe.Pointer(cName))
 	defer C.free(unsafe.Pointer(cLocal))
-	defer C.free(unsafe.Pointer(cPeer))
-	state := int(C.address_ownership(cName, cLocal, cPeer))
+	state := int(C.address_ownership(cName, cLocal))
 	return requireAddressState("verify synthetic IPv4 address ownership", state, addressStateOwned)
 }
 
@@ -366,11 +383,10 @@ func (configured *IPv4Route) proveAbsentAfterTunnelExit() error {
 	if interfaces[configured.name] {
 		return errors.New("owned utun remains after backend exit")
 	}
-	cName, cLocal, cPeer := C.CString(configured.name), C.CString(configured.local), C.CString(configured.peer)
+	cName, cLocal := C.CString(configured.name), C.CString(configured.local)
 	defer C.free(unsafe.Pointer(cName))
 	defer C.free(unsafe.Pointer(cLocal))
-	defer C.free(unsafe.Pointer(cPeer))
-	if state := int(C.address_ownership(cName, cLocal, cPeer)); state != addressStateAbsent {
+	if state := int(C.address_ownership(cName, cLocal)); state != addressStateAbsent {
 		return requireAddressState("verify vanished synthetic IPv4 address", state, addressStateAbsent)
 	}
 	message, err := configured.requestTargetLookup()
