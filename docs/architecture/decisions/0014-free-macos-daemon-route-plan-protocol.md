@@ -20,6 +20,13 @@ It rejects IPv6, `/0`, `/1`, unknown JSON fields, and duplicate destinations.
 The plan is bound to the request's validated profile UUID and is rejected for
 every non-`start` operation.
 
+Every client operation first sends the keyless `hello` request. It contains no
+profile ID, configuration, or route plan, and succeeds only when the daemon
+returns the exact integer protocol version. A missing, malformed, rejected, or
+mismatched response is incompatible; the client sends no configuration after
+that result. The request version remains exact, so a daemon replacement after
+`hello` also rejects an incompatible later operation before applying it.
+
 Before it starts a backend child, the daemon also checks only that every
 `tunnel` route is contained by an `allowed_ip` UAPI field and every
 `physicalEndpoint` `/32` matches a literal resolved `endpoint` UAPI field, and
@@ -32,3 +39,4 @@ PF state, interface, or gateway.
 This remains a narrow IPC consistency boundary. It does not reconstruct
 excluded routes or route ownership; those remain in `WireGuardKit`. A future
 consumer needs a separately reviewed lifecycle and native-routing change.
+The fresh-install POC still has no update mechanism.

@@ -21,6 +21,7 @@ enum DaemonControlClientError: Error, Equatable {
     case connectionFailed
     case timedOut
     case invalidResponse
+    case incompatibleDaemon
     case daemonRejected
 }
 
@@ -39,21 +40,29 @@ final class DaemonControlClient {
     }
 
     func list() throws -> [DaemonControlProfileStatus] {
-        try DaemonControlProtocol.decodeListResponse(request(operation: "list", profileID: nil))
+        try verifyCompatibility()
+        return try DaemonControlProtocol.decodeListResponse(request(operation: "list", profileID: nil))
     }
 
     func status(profileID: UUID) throws -> DaemonControlProfileStatus {
-        try DaemonControlProtocol.decodeStatusResponse(request(operation: "status", profileID: profileID), expectedProfileID: profileID)
+        try verifyCompatibility()
+        return try DaemonControlProtocol.decodeStatusResponse(request(operation: "status", profileID: profileID), expectedProfileID: profileID)
     }
 
     func start(profileID: UUID, uapiConfiguration: String) throws -> DaemonControlProfileStatus {
+        try verifyCompatibility()
         let response = try request(operation: "start", profileID: profileID, uapiConfiguration: uapiConfiguration)
         return try DaemonControlProtocol.decodeStartResponse(response, expectedProfileID: profileID)
     }
 
     func stop(profileID: UUID) throws {
+        try verifyCompatibility()
         let response = try request(operation: "stop", profileID: profileID)
         try DaemonControlProtocol.decodeStopResponse(response, expectedProfileID: profileID)
+    }
+
+    private func verifyCompatibility() throws {
+        try DaemonControlProtocol.decodeHelloResponse(request(operation: "hello", profileID: nil))
     }
 
     private func request(operation: String, profileID: UUID?, uapiConfiguration: String? = nil) throws -> Data {
@@ -82,12 +91,13 @@ final class DaemonControlClient {
 }
 
 enum DaemonControlProtocol {
+    static let protocolVersion = 1
     static let maximumFrameBytes = 4 * 1024
     static let maximumConfigurationBytes = 2 * 1024
     private static let maximumSocketPathBytes = 103
 
     private struct Request: Encodable {
-        let version = 1
+        let version = DaemonControlProtocol.protocolVersion
         let operation: String
         let profileID: String?
         let config: String?
@@ -103,8 +113,17 @@ enum DaemonControlProtocol {
     private struct Response: Decodable {
         let ok: Bool
         let error: String?
+        let protocolVersion: Int?
         let profile: Profile?
         let profiles: [Profile]?
+
+        enum CodingKeys: String, CodingKey {
+            case ok
+            case error
+            case protocolVersion = "protocol_version"
+            case profile
+            case profiles
+        }
     }
 
     private struct Profile: Decodable {
@@ -163,6 +182,18 @@ enum DaemonControlProtocol {
             throw DaemonControlClientError.invalidResponse
         }
         return statuses
+    }
+
+    static func decodeHelloResponse(_ data: Data) throws {
+        guard let response = try? decodeResponse(data),
+              response.ok,
+              response.error == nil,
+              response.protocolVersion == protocolVersion,
+              response.profile == nil,
+              response.profiles == nil
+        else {
+            throw DaemonControlClientError.incompatibleDaemon
+        }
     }
 
     static func decodeStatusResponse(_ data: Data, expectedProfileID: UUID) throws -> DaemonControlProfileStatus {

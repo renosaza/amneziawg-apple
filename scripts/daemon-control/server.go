@@ -23,6 +23,7 @@ import (
 )
 
 const (
+	protocolVersion    = 1
 	maxFrameBytes      = 4 * 1024
 	maxProfiles        = 3
 	maxConnections     = 16
@@ -59,10 +60,11 @@ type Profile struct {
 }
 
 type response struct {
-	OK       bool      `json:"ok"`
-	Error    string    `json:"error,omitempty"`
-	Profile  *Profile  `json:"profile,omitempty"`
-	Profiles []Profile `json:"profiles,omitempty"`
+	OK              bool      `json:"ok"`
+	Error           string    `json:"error,omitempty"`
+	ProtocolVersion int       `json:"protocol_version,omitempty"`
+	Profile         *Profile  `json:"profile,omitempty"`
+	Profiles        []Profile `json:"profiles,omitempty"`
 }
 
 // Server owns one user's ephemeral backend sessions.
@@ -132,6 +134,8 @@ func (server *Server) apply(request request) response {
 	}
 
 	switch request.Operation {
+	case "hello":
+		return response{OK: true, ProtocolVersion: protocolVersion}
 	case "list":
 		profiles := make([]Profile, 0, len(server.profiles))
 		for id, session := range server.profiles {
@@ -226,11 +230,11 @@ func decodeRequest(frame []byte) (request, error) {
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return request, errors.New("request has trailing JSON")
 	}
-	if request.Version != 1 {
+	if request.Version != protocolVersion {
 		return request, errors.New("unsupported protocol version")
 	}
 	switch request.Operation {
-	case "list", "quiesce":
+	case "hello", "list", "quiesce":
 		if request.ProfileID != "" || request.Config != "" || request.RoutePlan != nil {
 			return request, errors.New("operation does not accept a profile")
 		}
