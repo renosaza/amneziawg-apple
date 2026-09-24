@@ -5,6 +5,7 @@ package daemoncontrol
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"strings"
 	"testing"
 )
@@ -116,6 +117,7 @@ func TestRoutePlanRequiresCanonicalIPv4LocalAddress(t *testing.T) {
 		`{"local_address":"2001:db8::2/128","routes":[]}`,
 		`{"local_address":"0.0.0.0/32","routes":[]}`,
 		`{"local_address":"0.1.2.3/32","routes":[]}`,
+		`{"local_address":"240.0.0.1/32","routes":[]}`,
 		`{"local_address":"127.0.0.1/32","routes":[]}`,
 		`{"local_address":"169.254.1.1/32","routes":[]}`,
 		`{"local_address":"224.0.0.1/32","routes":[]}`,
@@ -123,6 +125,20 @@ func TestRoutePlanRequiresCanonicalIPv4LocalAddress(t *testing.T) {
 	} {
 		if err := validRoutePlan([]byte(plan)); err == nil {
 			t.Fatalf("accepted invalid local address: %s", plan)
+		}
+	}
+}
+
+func TestRoutePlanRejectsUnusablePhysicalEndpoint(t *testing.T) {
+	for _, address := range []string{"0.0.0.1", "240.0.0.1"} {
+		plan := `{"local_address":"192.0.2.2/32","routes":[{"destination":"192.0.2.0/24","owner":"tunnel"},{"destination":"` + address + `/32","owner":"physicalEndpoint"}]}`
+		if err := validRoutePlan([]byte(plan)); err == nil {
+			t.Fatalf("accepted %s", address)
+		}
+	}
+	for _, address := range []string{"10.0.0.1", "192.0.2.1"} {
+		if !usableIPv4Address(netip.MustParseAddr(address)) {
+			t.Fatalf("rejected %s", address)
 		}
 	}
 }
