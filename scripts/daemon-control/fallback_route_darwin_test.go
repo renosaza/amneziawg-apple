@@ -26,6 +26,12 @@ func TestPlannedSplitRejectsForeignMoreSpecificRIBRoute(t *testing.T) {
 	}
 }
 
+func TestPlannedSplitIgnoresNonRouteRIBMessage(t *testing.T) {
+	if hasForeignMoreSpecificRoute([]route.Message{&route.InterfaceMessage{}}, netip.MustParsePrefix("198.51.100.0/24"), nil) {
+		t.Fatal("non-route RIB message became a conflict")
+	}
+}
+
 func TestSyntheticFallbackRouteOwnership(t *testing.T) {
 	configured := &SyntheticFallbackRoute{
 		name:   "utun7",

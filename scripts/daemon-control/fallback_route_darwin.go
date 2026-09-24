@@ -90,6 +90,9 @@ func (configured *SyntheticFallbackRoute) hasForeignMoreSpecificRoute(endpoint *
 func hasForeignMoreSpecificRoute(messages []route.Message, planned netip.Prefix, endpoint *PhysicalEndpointRoute) bool {
 	for _, parsed := range messages {
 		message, ok := parsed.(*route.RouteMessage)
+		if !ok {
+			continue
+		}
 		prefix, ok := routePrefix(message)
 		if ok && (endpoint == nil || !endpoint.ownsRoute(message)) && message.Flags&syscall.RTF_UP != 0 && planned.Contains(prefix.Addr()) && prefix.Bits() > planned.Bits() {
 			return true
