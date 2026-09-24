@@ -146,7 +146,7 @@ func TestManualSyntheticThreeTunnelLifecycle(t *testing.T) {
 	}
 	const replacementID = "44444444-2222-4333-8444-555555555555"
 	if started := server.apply(request{Operation: "start", ProfileID: replacementID, Config: "private_key=0404040404040404040404040404040404040404040404040404040404040404"}); !started.OK {
-		t.Fatalf("replacement start failed: %#v", started)
+		t.Fatalf("replacement start failed at %s: %#v", backend.(*tunnelBackend).lastStartStage, started)
 	}
 	replacement := server.profiles[replacementID].value.(*tunnelProcess)
 	if replacement.route == nil || replacement.endpointRoute == nil || replacement.fallbackRoute == nil || replacement.precedenceEndpointRoute == nil || replacement.route.target != middleRoute.target || replacement.endpointRoute.target != middleEndpointRoute.target || replacement.precedenceEndpointRoute.target != middlePrecedenceEndpointRoute.target {
