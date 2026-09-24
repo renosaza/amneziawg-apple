@@ -33,7 +33,14 @@ func NewTunnelBackend(binary string) (Backend, error) {
 // NewTunnelBackendWithRoutePlanRuntime is for a root-controlled daemon flag;
 // IPC cannot enable route-plan mutation.
 func NewTunnelBackendWithRoutePlanRuntime(binary string, allowRoutePlans bool) (Backend, error) {
-	return newTunnelBackendWithRoutePlanRuntime(binary, allowRoutePlans)
+	return newTunnelBackendWithRoutePlanRuntime(binary, allowRoutePlans, false)
+}
+
+// NewTunnelBackendWithFullRouteRuntime requires a second root-controlled flag
+// before a logical default-route plan can mutate the routing table. IPC never
+// enables either flag.
+func NewTunnelBackendWithFullRouteRuntime(binary string, allowRoutePlans, allowFullRoutes bool) (Backend, error) {
+	return newTunnelBackendWithRoutePlanRuntime(binary, allowRoutePlans, allowFullRoutes)
 }
 
 var errBackendUnavailable = errors.New("real tunnel backend is unavailable on this platform")

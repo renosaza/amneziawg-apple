@@ -3,6 +3,7 @@
 package daemoncontrol
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -26,6 +27,16 @@ func (backend *plannedFakeBackend) StartWithRoutePlan(string, routePlan) (Sessio
 	defer backend.mu.Unlock()
 	backend.starts++
 	return Session{value: backend.starts}, nil
+}
+
+type recordedRoutePlanBackend struct {
+	plannedFakeBackend
+	plan routePlan
+}
+
+func (backend *recordedRoutePlanBackend) StartWithRoutePlan(config string, plan routePlan) (Session, error) {
+	backend.plan = plan
+	return backend.plannedFakeBackend.StartWithRoutePlan(config, plan)
 }
 
 func TestRoutePlanStartIsValidatedBeforeBackendStart(t *testing.T) {
@@ -225,34 +236,176 @@ func TestRoutePlanRejectsTwoOwnersForDestination(t *testing.T) {
 	}
 }
 
-func TestFullAndExcludedRoutePlansDoNotReachBackend(t *testing.T) {
-	backend := &fakeBackend{}
+func TestFullRoutePlanReachesOnlyRoutePlanBackend(t *testing.T) {
+	backend := &recordedRoutePlanBackend{}
 	server, err := NewServerWithBackend(501, backend)
 	if err != nil {
 		t.Fatal(err)
 	}
-	requests := []struct{ config, plan string }{
-		{
-			config: "private_key=synthetic\npublic_key=peer\nallowed_ip=0.0.0.0/0\nendpoint=192.0.2.10:51820",
-			plan:   `{"local_address":"10.25.0.2/32","routes":[{"destination":"0.0.0.0/0","owner":"tunnel"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"}]}`,
-		},
-		{
-			config: "private_key=synthetic\npublic_key=peer\nallowed_ip=10.25.0.0/24\nendpoint=192.0.2.10:51820",
-			plan:   `{"local_address":"10.25.0.2/32","routes":[{"destination":"10.25.0.0/24","owner":"tunnel"},{"destination":"192.168.31.0/24","owner":"excluded"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"}]}`,
-		},
+	plan := fullPlanJSON(t, []string{"192.0.2.0/31"})
+	config := "private_key=synthetic\npublic_key=peer\nallowed_ip=0.0.0.0/0\nendpoint=192.0.2.10:51820"
+	response := exchange(t, server, 501, requestFrame(t, fmt.Sprintf(
+		`{"version":1,"operation":"start","profile_id":"%s","config":%q,"route_plan":%s}`,
+		profileID, config, plan,
+	)))
+	if !response.OK {
+		t.Fatalf("full plan: %#v", response)
 	}
-	for index, candidate := range requests {
-		response := exchange(t, server, 501, requestFrame(t, fmt.Sprintf(
-			`{"version":1,"operation":"start","profile_id":"aaaaaaaa-2222-4333-8444-%012x","config":%q,"route_plan":%s}`,
-			index+1, candidate.config, candidate.plan,
-		)))
-		if response.OK || response.Error != "invalid_request" {
-			t.Fatalf("candidate %d: %#v", index, response)
+	if starts, _ := backend.counts(); starts != 1 || !backend.plan.isDefaultTunnel() {
+		t.Fatalf("full plan did not reach route backend: starts=%d plan=%#v", starts, backend.plan)
+	}
+}
+
+func TestFullRoutePlanRequiresCanonicalComplement(t *testing.T) {
+	config := "private_key=synthetic\npublic_key=peer\nallowed_ip=0.0.0.0/0\nendpoint=192.0.2.10:51820"
+	valid := fullPlanJSON(t, []string{"192.0.2.0/31"})
+	if err := validRoutePlanMatchesConfig([]byte(valid), config); err != nil {
+		t.Fatalf("valid full plan: %v", err)
+	}
+	var plan routePlan
+	if err := json.Unmarshal([]byte(valid), &plan); err != nil {
+		t.Fatal(err)
+	}
+	var routes []routePlanRoute
+	if err := json.Unmarshal(plan.Routes, &routes); err != nil {
+		t.Fatal(err)
+	}
+	for index := range routes {
+		if routes[index].Owner == "tunnel" {
+			routes[index].Destination = "0.0.0.0/2"
+			break
 		}
 	}
-	if starts, _ := backend.counts(); starts != 0 {
-		t.Fatalf("unsupported plans reached backend: starts=%d", starts)
+	plan.Routes, _ = json.Marshal(routes)
+	broken, _ := json.Marshal(plan)
+	if err := validRoutePlanMatchesConfig(broken, config); err == nil {
+		t.Fatal("accepted a full plan with a non-complement tunnel route")
 	}
+}
+
+func TestFullRouteRejectsUnexcludedActivePeerEndpointInBothOrders(t *testing.T) {
+	fullConfig := "private_key=synthetic\npublic_key=sticky\nallowed_ip=0.0.0.0/0\nendpoint=192.0.2.10:51820"
+	splitConfig := "private_key=synthetic\npublic_key=corporate\nallowed_ip=10.25.0.0/24\nendpoint=198.51.100.10:51820"
+	splitPlan := `{"local_address":"10.25.0.2/32","routes":[{"destination":"10.25.0.0/24","owner":"tunnel"},{"destination":"198.51.100.10/32","owner":"physicalEndpoint"}]}`
+	start := func(server *Server, id, config, plan string) response {
+		return exchange(t, server, 501, requestFrame(t, fmt.Sprintf(`{"version":1,"operation":"start","profile_id":"%s","config":%q,"route_plan":%s}`, id, config, plan)))
+	}
+	for _, firstFull := range []bool{true, false} {
+		server, err := NewServerWithBackend(501, &plannedFakeBackend{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		fullPlan := strings.Replace(fullPlanJSON(t, []string{"192.168.31.0/24"}), "10.25.0.2/32", "10.100.0.2/32", 1)
+		if firstFull {
+			if response := start(server, profileID, fullConfig, fullPlan); !response.OK {
+				t.Fatalf("full first: %#v", response)
+			}
+			if response := start(server, profileIDTwo, splitConfig, splitPlan); response.Error != "planned_endpoint_conflict" {
+				t.Fatalf("split after unexcluded full: %#v", response)
+			}
+		} else {
+			if response := start(server, profileIDTwo, splitConfig, splitPlan); !response.OK {
+				t.Fatalf("split first: %#v", response)
+			}
+			if response := start(server, profileID, fullConfig, fullPlan); response.Error != "planned_endpoint_conflict" {
+				t.Fatalf("full after unexcluded split: %#v", response)
+			}
+		}
+	}
+
+	server, err := NewServerWithBackend(501, &plannedFakeBackend{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fullPlan := strings.Replace(fullPlanJSON(t, []string{"192.168.31.0/24", "10.25.0.0/24", "198.51.100.10/32"}), "10.25.0.2/32", "10.100.0.2/32", 1)
+	if response := start(server, profileID, fullConfig, fullPlan); !response.OK {
+		t.Fatalf("full with endpoint exclusion: %#v", response)
+	}
+	if response := start(server, profileIDTwo, splitConfig, splitPlan); !response.OK {
+		t.Fatalf("split after endpoint exclusion: %#v", response)
+	}
+}
+
+func TestIPv4ComplementPreservesExclusions(t *testing.T) {
+	excluded := []netip.Prefix{netip.MustParsePrefix("192.0.2.0/31"), netip.MustParsePrefix("198.51.100.10/32")}
+	routes := ipv4TunnelComplement(excluded)
+	if len(routes) == 0 || len(routes) > maxRoutePlanRoutes {
+		t.Fatalf("complement route count=%d", len(routes))
+	}
+	for _, route := range routes {
+		for _, exclusion := range excluded {
+			if route.Overlaps(exclusion) {
+				t.Fatalf("%s overlaps %s", route, exclusion)
+			}
+		}
+	}
+	for _, reserved := range []netip.Prefix{
+		netip.MustParsePrefix("0.0.0.0/8"),
+		netip.MustParsePrefix("127.0.0.0/8"),
+		netip.MustParsePrefix("169.254.0.0/16"),
+		netip.MustParsePrefix("224.0.0.0/3"),
+	} {
+		if containsIPv4Prefix(routes, reserved.Addr()) {
+			t.Fatalf("tunnel complement captured reserved %s", reserved)
+		}
+	}
+	for _, address := range []netip.Addr{netip.MustParseAddr("1.1.1.1"), netip.MustParseAddr("203.0.113.1")} {
+		if !containsIPv4Prefix(routes, address) {
+			t.Fatalf("complement lost %s", address)
+		}
+	}
+}
+
+func TestFullRouteComplementFitsProtocolCap(t *testing.T) {
+	excluded := []netip.Prefix{
+		netip.MustParsePrefix("10.25.0.0/24"),
+		netip.MustParsePrefix("10.1.1.2/32"),
+		netip.MustParsePrefix("192.168.31.0/24"),
+		netip.MustParsePrefix("198.51.100.18/32"),
+		netip.MustParsePrefix("203.0.113.103/32"),
+	}
+	if count := len(ipv4TunnelComplement(excluded)); count > maxRoutePlanRoutes {
+		t.Fatalf("five IPv4 exclusions need %d routes; cap=%d", count, maxRoutePlanRoutes)
+	}
+}
+
+func containsIPv4Prefix(routes []netip.Prefix, address netip.Addr) bool {
+	for _, route := range routes {
+		if route.Contains(address) {
+			return true
+		}
+	}
+	return false
+}
+
+func fullPlanJSON(t *testing.T, excluded []string) string {
+	t.Helper()
+	prefixes := make([]netip.Prefix, 0, len(excluded))
+	for _, value := range excluded {
+		prefixes = append(prefixes, netip.MustParsePrefix(value))
+	}
+	routes := make([]routePlanRoute, 0, len(prefixes)+len(ipv4TunnelComplement(prefixes))+1)
+	for _, prefix := range ipv4TunnelComplement(prefixes) {
+		routes = append(routes, routePlanRoute{Destination: prefix.String(), Owner: "tunnel"})
+	}
+	for _, prefix := range prefixes {
+		routes = append(routes, routePlanRoute{Destination: prefix.String(), Owner: "excluded"})
+	}
+	routes = append(routes, routePlanRoute{Destination: "192.0.2.10/32", Owner: "physicalEndpoint"})
+	plan, err := json.Marshal(routePlan{LocalAddress: "10.25.0.2/32", Routes: mustJSON(t, routes)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(plan)
+}
+
+func mustJSON(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
 }
 
 func TestLegacyDefaultAllowedIPDoesNotReachBackend(t *testing.T) {

@@ -41,6 +41,43 @@ func configurePlannedSplitRoute(process *tunnelProcess, prefix netip.Prefix, end
 	return configureSplitRoute(process, prefix, false, endpoint)
 }
 
+// configurePlannedFullRoutes installs the canonical complement of ExcludeIPs.
+// It never replaces the physical default route or adds physical exclusion
+// routes, so an independently started split tunnel remains more specific.
+func configurePlannedFullRoutes(process *tunnelProcess, prefixes []netip.Prefix) ([]*SyntheticFallbackRoute, error) {
+	if process == nil || os.Geteuid() != 0 || !utunName.MatchString(process.name) || len(prefixes) == 0 {
+		return nil, errors.New("planned full routes require root and a utun")
+	}
+	configured := make([]*SyntheticFallbackRoute, 0, len(prefixes))
+	for _, prefix := range prefixes {
+		if !prefix.IsValid() || !prefix.Addr().Is4() || prefix != prefix.Masked() || prefix.Bits() == 0 {
+			return closePlannedFullRoutes(configured, errors.New("invalid planned full route"))
+		}
+		iface, err := net.InterfaceByName(process.name)
+		if err != nil {
+			return closePlannedFullRoutes(configured, err)
+		}
+		route := &SyntheticFallbackRoute{name: process.name, prefix: prefix, iface: iface}
+		configured = append(configured, route)
+		if err := route.add(); err != nil {
+			return closePlannedFullRoutes(configured, err)
+		}
+		if err := route.verifyOrRecoverShadowed(); err != nil {
+			return closePlannedFullRoutes(configured, err)
+		}
+	}
+	return configured, nil
+}
+
+func closePlannedFullRoutes(routes []*SyntheticFallbackRoute, startErr error) ([]*SyntheticFallbackRoute, error) {
+	for index := len(routes) - 1; index >= 0; index-- {
+		if err := routes[index].Close(); err != nil {
+			return routes, errors.Join(startErr, err)
+		}
+	}
+	return nil, startErr
+}
+
 func configureSplitRoute(process *tunnelProcess, prefix netip.Prefix, synthetic bool, endpoint *PhysicalEndpointRoute) (*SyntheticFallbackRoute, error) {
 	if process == nil || os.Geteuid() != 0 || !utunName.MatchString(process.name) {
 		return nil, errors.New("synthetic fallback route requires root and a utun")
@@ -131,6 +168,21 @@ func (configured *SyntheticFallbackRoute) verify() error {
 	}
 	if !configured.ownsRoute(message) {
 		return errors.New("synthetic fallback route ownership changed")
+	}
+	return nil
+}
+
+func (configured *SyntheticFallbackRoute) verifyOrRecoverShadowed() error {
+	message, err := configured.lookup()
+	if err != nil || message.Err != nil {
+		return errors.Join(err, message.Err)
+	}
+	if configured.ownsRoute(message) {
+		return nil
+	}
+	ownedInRIB, err := configured.ownsRouteInRIB()
+	if err != nil || !configured.canRecoverShadowedRoute(message, ownedInRIB) {
+		return errors.Join(err, errors.New("planned full route ownership changed"))
 	}
 	return nil
 }
