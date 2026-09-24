@@ -28,7 +28,14 @@ and planned sessions cannot coexist.
 ## Consequences
 
 This adds daemon-side ownership checks only. It does not add full/default
-routes, IPv6, DNS, `ExcludeIPs`, hostname resolution, gateway selection, or
-multi-profile Manager activation. The Manager remains deliberately
+routes, IPv6, DNS, `ExcludeIPs`, hostname resolution, or automatic gateway
+rebinding. The backend selects one physical IPv4 RIB base route at start and
+records its gateway and interface for the endpoint host route. A network
+change while a session is active is unsupported: stop it and start it again
+after the network has settled. Until a rebind design is implemented and
+runtime-validated, do not treat an existing daemon session as safe after a
+Wi-Fi, Ethernet, sleep, or wake transition. An exact endpoint host route,
+including one through `utun`, is rejected rather than replaced.
+This does not add multi-profile Manager activation. The Manager remains deliberately
 single-profile until its lifecycle and routing validation can use this daemon
 contract safely.
