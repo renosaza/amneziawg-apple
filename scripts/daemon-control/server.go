@@ -44,7 +44,8 @@ type request struct {
 // routePlan matches WireGuardKit's MacOSDaemonRoutePlan JSON shape. It is
 // validated at the IPC boundary only; the experimental daemon does not apply it.
 type routePlan struct {
-	Routes json.RawMessage `json:"routes"`
+	LocalAddress string          `json:"local_address"`
+	Routes       json.RawMessage `json:"routes"`
 }
 
 type routePlanRoute struct {
@@ -274,6 +275,12 @@ func validRoutePlan(raw json.RawMessage) error {
 	if plan.Routes == nil || bytes.Equal(plan.Routes, []byte("null")) {
 		return errors.New("invalid route plan")
 	}
+	localAddress, err := netip.ParsePrefix(plan.LocalAddress)
+	if err != nil || !localAddress.Addr().Is4() || localAddress.Bits() != 32 ||
+		localAddress != localAddress.Masked() || localAddress.String() != plan.LocalAddress ||
+		!usableLocalIPv4(localAddress.Addr()) {
+		return errors.New("invalid route plan")
+	}
 	decoder = json.NewDecoder(bytes.NewReader(plan.Routes))
 	decoder.DisallowUnknownFields()
 	var routes []routePlanRoute
@@ -304,6 +311,15 @@ func validRoutePlan(raw json.RawMessage) error {
 		seen[prefix] = struct{}{}
 	}
 	return nil
+}
+
+func usableLocalIPv4(address netip.Addr) bool {
+	if !address.Is4() || !address.IsGlobalUnicast() {
+		return false
+	}
+	bytes := address.As4()
+	return bytes[0] != 0 && bytes[0] < 224 && bytes[0] != 127 &&
+		!(bytes[0] == 169 && bytes[1] == 254)
 }
 
 // validRoutePlanMatchesConfig only binds a route plan to the UAPI fields it
