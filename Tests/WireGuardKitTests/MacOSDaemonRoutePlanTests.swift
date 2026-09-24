@@ -104,6 +104,49 @@ final class MacOSDaemonRoutePlanTests: XCTestCase {
         ])
     }
 
+    func testBuildsSingleIPv4FullPlanWithEndpointExclusion() throws {
+        let endpoint = Endpoint(from: "198.51.100.10:51820")!
+        let plan = try MacOSDaemonRoutePlan.buildSingleIPv4Full(
+            activating: "sticky",
+            configuration: configuration(
+                allowed: ["0.0.0.0/0"],
+                excluded: ["192.168.31.0/24", "198.51.100.10/32"],
+                endpoint: endpoint
+            )
+        ).get()
+
+        XCTAssertTrue(plan.routes.contains(.init(destination: "198.51.100.10/32", owner: .physicalEndpoint)))
+        XCTAssertFalse(plan.routes.contains(.init(destination: "198.51.100.10/32", owner: .tunnel)))
+        XCTAssertTrue(plan.routes.contains(.init(destination: "192.168.31.0/24", owner: .excluded)))
+    }
+
+    func testSingleIPv4FullRequiresLiteralEndpointExclusion() {
+        let endpoint = Endpoint(from: "198.51.100.10:51820")!
+        XCTAssertEqual(
+            MacOSDaemonRoutePlan.buildSingleIPv4Full(
+                activating: "sticky",
+                configuration: configuration(
+                    allowed: ["0.0.0.0/0"], excluded: ["192.168.31.0/24"], endpoint: endpoint)
+            ),
+            .failure(.unsupportedConfiguration)
+        )
+    }
+
+    func testSingleIPv4FullAllowsExcludedActiveSplitEndpoint() throws {
+        let stickyEndpoint = Endpoint(from: "198.51.100.10:51820")!
+        let cmEndpoint = Endpoint(from: "203.0.113.10:51820")!
+        let sticky = configuration(
+            allowed: ["0.0.0.0/0"],
+            excluded: ["10.25.0.0/24", "198.51.100.10/32", "203.0.113.10/32"],
+            endpoint: stickyEndpoint
+        )
+        let cm = configuration(allowed: ["10.25.0.0/24"], endpoint: cmEndpoint)
+
+        XCTAssertNoThrow(try MacOSDaemonRoutePlan.buildSingleIPv4Full(
+            activating: "sticky", configuration: sticky, activeTunnels: [("CM", cm)]
+        ).get())
+    }
+
     func testSingleIPv4SplitRejectsOverlappingActiveSplitTunnel() {
         let result = MacOSDaemonRoutePlan.buildSingleIPv4Split(
             activating: "pdkkfc",

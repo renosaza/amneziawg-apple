@@ -90,6 +90,43 @@ public struct MacOSDaemonRoutePlan: Codable, Equatable {
         ).mapError(MacOSDaemonSingleSplitProfileError.routePlan)
     }
 
+    public static func buildSingleIPv4Full(
+        activating name: String,
+        configuration: TunnelConfiguration,
+        activeTunnels: [(name: String, configuration: TunnelConfiguration)] = []
+    ) -> Result<MacOSDaemonRoutePlan, MacOSDaemonSingleSplitProfileError> {
+        guard configuration.interface.addresses.count == 1,
+              configuration.interface.addresses[0].address is IPv4Address,
+              configuration.interface.dns.isEmpty,
+              configuration.interface.dnsSearch.isEmpty,
+              configuration.peers.count == 1
+        else {
+            return .failure(.unsupportedConfiguration)
+        }
+        let peer = configuration.peers[0]
+        guard peer.allowedIPs.count == 1,
+              let allowedIP = peer.allowedIPs.first,
+              let routeAddress = allowedIP.address as? IPv4Address,
+              routeAddress.rawValue.allSatisfy({ $0 == 0 }),
+              allowedIP.networkPrefixLength == 0,
+              peer.excludeIPs.allSatisfy({ $0.address is IPv4Address }),
+              let endpoint = peer.endpoint,
+              case .ipv4(let endpointAddress) = endpoint.host,
+              isUsableIPv4Address(endpointAddress),
+              peer.excludeIPs.contains(where: {
+                  $0.address as? IPv4Address == endpointAddress && $0.networkPrefixLength == 32
+              })
+        else {
+            return .failure(.unsupportedConfiguration)
+        }
+        return build(
+            activating: name,
+            configuration: configuration,
+            resolvedEndpoints: [endpoint],
+            activeTunnels: activeTunnels
+        ).mapError(MacOSDaemonSingleSplitProfileError.routePlan)
+    }
+
     public static func build(
         activating name: String,
         configuration: TunnelConfiguration,

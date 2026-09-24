@@ -255,9 +255,11 @@ final class DaemonTunnelsManager: TunnelsManager {
                 return
             }
             let client: DaemonControlClient
+            let capabilities: DaemonControlCapabilities
             let statuses: [DaemonControlProfileStatus]
             do {
                 client = try DaemonControlClient(socketPath: Self.controlSocketPath)
+                capabilities = try client.capabilities()
                 statuses = try client.list()
             } catch {
                 self.uncertainDaemonProfileIDs.insert(profileID)
@@ -290,11 +292,22 @@ final class DaemonTunnelsManager: TunnelsManager {
                 return
             }
             let plan: MacOSDaemonRoutePlan
-            switch MacOSDaemonRoutePlan.buildSingleIPv4Split(
-                activating: tunnel.name,
-                configuration: configuration,
-                activeTunnels: activeTunnels
-            ) {
+            let routePlanResult: Result<MacOSDaemonRoutePlan, MacOSDaemonSingleSplitProfileError>
+            if Self.isIPv4FullTunnel(configuration) {
+                routePlanResult = capabilities.supportsIPv4FullRoute ?
+                    MacOSDaemonRoutePlan.buildSingleIPv4Full(
+                        activating: tunnel.name,
+                        configuration: configuration,
+                        activeTunnels: activeTunnels
+                    ) : .failure(.unsupportedConfiguration)
+            } else {
+                routePlanResult = MacOSDaemonRoutePlan.buildSingleIPv4Split(
+                    activating: tunnel.name,
+                    configuration: configuration,
+                    activeTunnels: activeTunnels
+                )
+            }
+            switch routePlanResult {
             case .success(let builtPlan):
                 plan = builtPlan
             case .failure(let error):
@@ -480,6 +493,14 @@ final class DaemonTunnelsManager: TunnelsManager {
             return .missingEndpointExclusion(tunnelName: tunnelName, endpoint: endpoint)
         case .routePlan:
             return .daemonModeUnsupportedProfile
+        }
+    }
+
+    private static func isIPv4FullTunnel(_ configuration: TunnelConfiguration) -> Bool {
+        configuration.peers.contains { peer in
+            peer.allowedIPs.contains { allowedIP in
+                allowedIP.address is IPv4Address && allowedIP.networkPrefixLength == 0
+            }
         }
     }
 
