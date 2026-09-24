@@ -3,10 +3,20 @@
 package daemoncontrol
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 )
+
+type partialRoutePlanBackend struct{ fakeBackend }
+
+func (backend *partialRoutePlanBackend) StartWithRoutePlan(string, routePlan) (Session, error) {
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	backend.starts++
+	return Session{value: backend.starts}, errors.New("synthetic partial start")
+}
 
 func TestRoutePlanStartIsValidatedBeforeBackendStart(t *testing.T) {
 	backend := &fakeBackend{}
@@ -31,6 +41,34 @@ func TestRoutePlanStartIsValidatedBeforeBackendStart(t *testing.T) {
 	}
 	if starts, _ := backend.counts(); starts != 0 {
 		t.Fatalf("invalid plan reached backend: starts=%d", starts)
+	}
+}
+
+func TestRoutePlanPartialStartRetainsSingletonReservation(t *testing.T) {
+	backend := &partialRoutePlanBackend{}
+	server, err := NewServerWithBackend(501, backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const config = "private_key=synthetic\nallowed_ip=192.0.2.0/24\nendpoint=192.0.2.10:51820"
+	const plan = `{"local_address":"192.0.2.2/32","routes":[{"destination":"192.0.2.0/24","owner":"tunnel"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"}]}`
+	for _, id := range []string{profileID, profileIDTwo} {
+		response := exchange(t, server, 501, requestFrame(t, fmt.Sprintf(
+			`{"version":1,"operation":"start","profile_id":"%s","config":%q,"route_plan":%s}`,
+			id, config, plan,
+		)))
+		if id == profileID && response.Error != "start_failed" {
+			t.Fatalf("partial start: %#v", response)
+		}
+		if id == profileIDTwo && response.Error != "planned_session_active" {
+			t.Fatalf("second planned start: %#v", response)
+		}
+	}
+	if starts, _ := backend.counts(); starts != 1 {
+		t.Fatalf("starts=%d", starts)
+	}
+	if response := server.apply(request{Operation: "stop", ProfileID: profileID}); !response.OK {
+		t.Fatalf("cleanup partial start: %#v", response)
 	}
 }
 

@@ -245,7 +245,7 @@ func configureIPv4Address(process *tunnelProcess, local netip.Addr, target *neti
 	if flags&int(C.IFF_UP) == 0 {
 		configured.upChanged = true
 		if err := configured.setInterfaceFlags(flags | int(C.IFF_UP)); err != nil {
-			return nil, errors.Join(err, configured.Close())
+			return configured.cleanupFailedAddressSetup(err)
 		}
 	}
 	if configured.routeEnabled {
@@ -439,6 +439,16 @@ func (configured *IPv4Route) write(kind int) error {
 
 func (configured *IPv4Route) cleanupFailedRouteAdd(err error) (*IPv4Route, error) {
 	if !configured.routeSet {
+		return nil, err
+	}
+	if cleanupErr := configured.Close(); cleanupErr != nil {
+		return configured, errors.Join(err, cleanupErr)
+	}
+	return nil, err
+}
+
+func (configured *IPv4Route) cleanupFailedAddressSetup(err error) (*IPv4Route, error) {
+	if !configured.addressSet {
 		return nil, err
 	}
 	if cleanupErr := configured.Close(); cleanupErr != nil {
