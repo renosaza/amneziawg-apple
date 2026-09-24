@@ -34,6 +34,8 @@ jobs:
         run: make -C Sources/WireGuardKitGo
       - name: Test the isolated daemon-control protocol POC
         run: go test -C scripts/daemon-control ./...
+      - name: Verify the manual full-route POC safety boundaries
+        run: scripts/test-daemon-full-route-poc.sh
       - name: Test the read-only macOS daemon-control client
         run: scripts/test-daemon-control-client.sh
       - name: Test unsigned daemon GUI target boundaries

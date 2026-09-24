@@ -1,0 +1,159 @@
+name: macOS daemon-control full-route POC
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-route-smoke:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: scripts/daemon-control/go.mod
+          cache-dependency-path: scripts/daemon-control/go.sum
+      - name: Exercise the opt-in TEST-NET full route and split routes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          go build -C Sources/WireGuardKitGo -o ../../out/amneziawg-go github.com/amnezia-vpn/amneziawg-go/v3
+          go build -C scripts/daemon-control -o ../../out/amneziawg-daemon-control-poc ./cmd/daemon-control-poc
+
+          uid=$(id -u)
+          socket=/private/var/db/amneziawg-daemon-control-poc/control.sock
+          client="$GITHUB_WORKSPACE/out/amneziawg-daemon-control-poc"
+          installer="$GITHUB_WORKSPACE/scripts/install-daemon-control-poc.sh"
+          watchdog_pid=
+
+          route_interface() {
+            route -n get "$1" | awk '/interface:/{print $2; exit}'
+          }
+          route_destination() {
+            route -n get "$1" | awk '/destination:/{print $2; exit}'
+          }
+          require_physical() {
+            local interface
+            interface=$(route_interface "$1")
+            case "$interface" in
+              ""|utun[0-9]*) echo "expected physical route for $1, got ${interface:-none}" >&2; return 1 ;;
+            esac
+          }
+          verify_absent() {
+            local failed=0 target interface destination
+            for path in \
+              /Library/LaunchDaemons/com.amneziawg.daemon-control.poc.plist \
+              /usr/local/libexec/amneziawg-daemon-control-poc \
+              /usr/local/libexec/amneziawg-go-daemon-control-poc \
+              /private/var/db/amneziawg-daemon-control-poc \
+              "$socket"; do
+              if [[ -e "$path" ]]; then
+                echo "cleanup left $path" >&2
+                failed=1
+              fi
+            done
+            if sudo launchctl print system/com.amneziawg.daemon-control-poc >/dev/null 2>&1; then
+              echo "cleanup left the LaunchDaemon loaded" >&2
+              failed=1
+            fi
+            for target in 203.0.113.1 198.51.100.20 192.0.2.200 192.0.2.50; do
+              interface=$(route_interface "$target") || failed=1
+              case "$interface" in utun[0-9]*) echo "cleanup left $target on $interface" >&2; failed=1 ;; esac
+            done
+            for target in 203.0.113.10 198.51.100.10 192.0.2.250; do
+              destination=$(route_destination "$target") || failed=1
+              if [[ $destination == "$target" ]]; then
+                echo "cleanup left TEST-NET endpoint host route $target" >&2
+                failed=1
+              fi
+            done
+            return "$failed"
+          }
+          cleanup_core() {
+            set +e
+            if [[ -S "$socket" ]]; then
+              sudo -u "#$uid" "$client" -manual-route-plan-stop-three -socket "$socket"
+              sudo -u "#$uid" "$client" -manual-route-plan-stop -socket "$socket"
+              sudo -u "#$uid" "$client" -manual-full-route-plan-stop -socket "$socket"
+            fi
+            if [[ -e /Library/LaunchDaemons/com.amneziawg.daemon-control.poc.plist || -e "$socket" ]]; then
+              sudo "$installer" uninstall --uid "$uid"
+            fi
+          }
+          disarm_watchdog() {
+            if [[ -n $watchdog_pid ]]; then
+              kill "$watchdog_pid" >/dev/null 2>&1 || true
+              wait "$watchdog_pid" >/dev/null 2>&1 || true
+              watchdog_pid=
+            fi
+          }
+          cleanup() {
+            local original_status=$? cleanup_failed=0
+            trap - EXIT
+            disarm_watchdog
+            cleanup_core
+            if ! verify_absent; then
+              cleanup_failed=1
+            fi
+            if [[ $cleanup_failed -ne 0 && $original_status -eq 0 ]]; then
+              exit 1
+            fi
+            exit "$original_status"
+          }
+          arm_watchdog() {
+            (
+              sleep 75
+              cleanup_core
+            ) >"$GITHUB_WORKSPACE/out/full-route-watchdog.log" 2>&1 < /dev/null &
+            watchdog_pid=$!
+          }
+          trap cleanup EXIT
+
+          physical_interface=$(route_interface 203.0.113.1)
+          case "$physical_interface" in ""|utun[0-9]*) exit 1 ;; esac
+          for target in 203.0.113.10 198.51.100.10 192.0.2.250; do
+            require_physical "$target"
+            [[ $(route_destination "$target") != "$target" ]]
+          done
+
+          sudo "$installer" install \
+            --daemon "$client" \
+            --amneziawg-go "$GITHUB_WORKSPACE/out/amneziawg-go" \
+            --uid "$uid" \
+            --allow-route-plan-runtime \
+            --allow-full-route-runtime
+          arm_watchdog
+
+          sudo -u "#$uid" "$client" -manual-full-route-plan-start -socket "$socket"
+          full_interface=$(route_interface 203.0.113.1)
+          case "$full_interface" in utun[0-9]*) ;; *) exit 1 ;; esac
+          require_physical 192.0.2.50
+          require_physical 203.0.113.10
+
+          sudo -u "#$uid" "$client" -manual-route-plan-start -socket "$socket"
+          sudo -u "#$uid" "$client" -manual-route-plan-start-three -socket "$socket"
+          first_interface=$(route_interface 198.51.100.20)
+          second_interface=$(route_interface 192.0.2.200)
+          case "$first_interface" in utun[0-9]*) ;; *) exit 1 ;; esac
+          case "$second_interface" in utun[0-9]*) ;; *) exit 1 ;; esac
+          [[ $first_interface != "$second_interface" ]]
+          [[ $first_interface != "$full_interface" ]]
+          [[ $second_interface != "$full_interface" ]]
+          require_physical 203.0.113.10
+          require_physical 198.51.100.10
+          require_physical 192.0.2.250
+
+          sudo -u "#$uid" "$client" -manual-route-plan-stop -socket "$socket"
+          sudo -u "#$uid" "$client" -manual-route-plan-assert-full-three -socket "$socket"
+          [[ $(route_interface 203.0.113.1) == "$full_interface" ]]
+          [[ $(route_interface 192.0.2.200) == "$second_interface" ]]
+
+          sudo -u "#$uid" "$client" -manual-full-route-plan-stop -socket "$socket"
+          sudo -u "#$uid" "$client" -manual-route-plan-assert-three -socket "$socket"
+          [[ $(route_interface 192.0.2.200) == "$second_interface" ]]
+
+          sudo -u "#$uid" "$client" -manual-route-plan-stop-three -socket "$socket"

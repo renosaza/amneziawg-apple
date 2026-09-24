@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -26,6 +27,7 @@ const maxFrameBytes = 4 * 1024
 const manualRoutePlanProfileID = "11111111-2222-4333-8444-555555555555"
 const manualRoutePlanProfileIDTwo = "22222222-3333-4444-8555-666666666666"
 const manualRoutePlanProfileIDThree = "33333333-4444-4555-8666-777777777777"
+const manualFullRoutePlanProfileID = "44444444-5555-4666-8777-888888888888"
 
 var manualRoutePlanRequest = struct {
 	Version   int             `json:"version"`
@@ -75,6 +77,22 @@ var manualRoutePlanRequestThree = struct {
 	RoutePlan: json.RawMessage(`{"local_address":"192.0.2.4/32","routes":[{"destination":"192.0.2.128/25","owner":"tunnel"},{"destination":"192.0.2.250/32","owner":"physicalEndpoint"}]}`),
 }
 
+var manualFullRoutePlanRequest = struct {
+	Version   int             `json:"version"`
+	Operation string          `json:"operation"`
+	ProfileID string          `json:"profile_id"`
+	Config    string          `json:"config,omitempty"`
+	RoutePlan json.RawMessage `json:"route_plan,omitempty"`
+}{
+	Version:   1,
+	Operation: "start",
+	ProfileID: manualFullRoutePlanProfileID,
+	Config: "private_key=7777777777777777777777777777777777777777777777777777777777777777\n" +
+		"public_key=8888888888888888888888888888888888888888888888888888888888888888\n" +
+		"allowed_ip=0.0.0.0/0\nendpoint=203.0.113.10:1",
+	RoutePlan: manualFullRoutePlan(),
+}
+
 func main() {
 	socket := flag.String("socket", "", "root-owned directory socket path")
 	uidText := flag.String("uid", "", "authorized non-root macOS UID")
@@ -90,14 +108,18 @@ func main() {
 	manualRoutePlanStartThree := flag.Bool("manual-route-plan-start-three", false, "send the third fixed synthetic route-plan start request")
 	manualRoutePlanStopThree := flag.Bool("manual-route-plan-stop-three", false, "stop the third fixed synthetic route-plan session")
 	manualRoutePlanAssertOneThree := flag.Bool("manual-route-plan-assert-one-three", false, "assert only the first and third fixed synthetic route-plan sessions are running")
+	manualFullRoutePlanStart := flag.Bool("manual-full-route-plan-start", false, "start the fixed synthetic full-route plan")
+	manualFullRoutePlanStop := flag.Bool("manual-full-route-plan-stop", false, "stop the fixed synthetic full-route plan")
+	manualRoutePlanAssertFullThree := flag.Bool("manual-route-plan-assert-full-three", false, "assert only the full and third fixed synthetic route-plan sessions are running")
+	manualRoutePlanAssertThree := flag.Bool("manual-route-plan-assert-three", false, "assert only the third fixed synthetic route-plan session is running")
 	flag.Parse()
-	if *checkIdle || *prepareStop || *manualRoutePlanStart || *manualRoutePlanStop || *manualRoutePlanStartTwo || *manualRoutePlanStopTwo || *manualRoutePlanStartThree || *manualRoutePlanStopThree || *manualRoutePlanAssertOneThree {
+	if *checkIdle || *prepareStop || *manualRoutePlanStart || *manualRoutePlanStop || *manualRoutePlanStartTwo || *manualRoutePlanStopTwo || *manualRoutePlanStartThree || *manualRoutePlanStopThree || *manualRoutePlanAssertOneThree || *manualFullRoutePlanStart || *manualFullRoutePlanStop || *manualRoutePlanAssertFullThree || *manualRoutePlanAssertThree {
 		if flag.NArg() != 0 || *socket == "" || *uidText != "" || *binaryPath != "" {
-			fmt.Fprintln(os.Stderr, "usage: daemon-control-poc -check-idle|-prepare-stop|-manual-route-plan-start|-manual-route-plan-stop|-manual-route-plan-start-two|-manual-route-plan-stop-two|-manual-route-plan-start-three|-manual-route-plan-stop-three|-manual-route-plan-assert-one-three -socket /var/run/name.sock")
+			fmt.Fprintln(os.Stderr, "usage: daemon-control-poc fixed control operation -socket /var/run/name.sock")
 			os.Exit(2)
 		}
 		operations := 0
-		for _, selected := range []bool{*checkIdle, *prepareStop, *manualRoutePlanStart, *manualRoutePlanStop, *manualRoutePlanStartTwo, *manualRoutePlanStopTwo, *manualRoutePlanStartThree, *manualRoutePlanStopThree, *manualRoutePlanAssertOneThree} {
+		for _, selected := range []bool{*checkIdle, *prepareStop, *manualRoutePlanStart, *manualRoutePlanStop, *manualRoutePlanStartTwo, *manualRoutePlanStopTwo, *manualRoutePlanStartThree, *manualRoutePlanStopThree, *manualRoutePlanAssertOneThree, *manualFullRoutePlanStart, *manualFullRoutePlanStop, *manualRoutePlanAssertFullThree, *manualRoutePlanAssertThree} {
 			if selected {
 				operations++
 			}
@@ -150,6 +172,34 @@ func main() {
 		}
 		if *manualRoutePlanAssertOneThree {
 			if err := daemonManualRoutePlanAssertProfiles(*socket, manualRoutePlanProfileID, manualRoutePlanProfileIDThree); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
+		}
+		if *manualFullRoutePlanStart {
+			if err := daemonManualRoutePlanStartRequest(*socket, manualFullRoutePlanRequest); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
+		}
+		if *manualFullRoutePlanStop {
+			if err := daemonManualRoutePlanStopRequest(*socket, manualFullRoutePlanProfileID); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
+		}
+		if *manualRoutePlanAssertFullThree {
+			if err := daemonManualRoutePlanAssertProfiles(*socket, manualFullRoutePlanProfileID, manualRoutePlanProfileIDThree); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
+		}
+		if *manualRoutePlanAssertThree {
+			if err := daemonManualRoutePlanAssertProfiles(*socket, manualRoutePlanProfileIDThree); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(1)
 			}
@@ -219,6 +269,65 @@ func main() {
 		fmt.Fprintln(os.Stderr, "daemon cleanup failed after retries")
 		os.Exit(1)
 	}
+}
+
+// manualFullRoutePlan creates a fixed TEST-NET plan for the disposable
+// full-route smoke test. It deliberately has no user-controlled inputs.
+func manualFullRoutePlan() json.RawMessage {
+	excluded := []netip.Prefix{
+		netip.MustParsePrefix("192.0.2.0/24"), // synthetic LAN and second split prefix
+		netip.MustParsePrefix("198.51.100.0/24"),
+	}
+	tunnelExcluded := append(append([]netip.Prefix(nil), excluded...), netip.MustParsePrefix("203.0.113.10/32"))
+	routes := make([]map[string]string, 0, 64)
+	for _, prefix := range manualIPv4TunnelComplement(tunnelExcluded) {
+		routes = append(routes, map[string]string{"destination": prefix.String(), "owner": "tunnel"})
+	}
+	for _, prefix := range excluded {
+		routes = append(routes, map[string]string{"destination": prefix.String(), "owner": "excluded"})
+	}
+	routes = append(routes, map[string]string{"destination": "203.0.113.10/32", "owner": "physicalEndpoint"})
+	plan, err := json.Marshal(map[string]any{"local_address": "192.0.2.6/32", "routes": routes})
+	if err != nil || len(plan) >= maxFrameBytes {
+		panic("fixed full-route smoke plan is invalid")
+	}
+	return plan
+}
+
+func manualIPv4TunnelComplement(excluded []netip.Prefix) []netip.Prefix {
+	routes := []netip.Prefix{
+		netip.MustParsePrefix("1.0.0.0/8"), netip.MustParsePrefix("2.0.0.0/7"),
+		netip.MustParsePrefix("4.0.0.0/6"), netip.MustParsePrefix("8.0.0.0/5"),
+		netip.MustParsePrefix("16.0.0.0/4"), netip.MustParsePrefix("32.0.0.0/3"),
+		netip.MustParsePrefix("64.0.0.0/2"), netip.MustParsePrefix("128.0.0.0/2"),
+		netip.MustParsePrefix("192.0.0.0/3"),
+	}
+	for _, exclusion := range excluded {
+		next := make([]netip.Prefix, 0, len(routes))
+		for _, route := range routes {
+			next = append(next, manualSubtractIPv4Prefix(route, exclusion)...)
+		}
+		routes = next
+	}
+	return routes
+}
+
+func manualSubtractIPv4Prefix(route, exclusion netip.Prefix) []netip.Prefix {
+	if !route.Overlaps(exclusion) {
+		return []netip.Prefix{route}
+	}
+	if exclusion.Bits() <= route.Bits() && exclusion.Contains(route.Addr()) {
+		return nil
+	}
+	if route.Bits() >= exclusion.Bits() || !route.Contains(exclusion.Addr()) {
+		return []netip.Prefix{route}
+	}
+	left := netip.PrefixFrom(route.Addr(), route.Bits()+1).Masked()
+	rightAddress := left.Addr().As4()
+	byteIndex := route.Bits() / 8
+	rightAddress[byteIndex] |= 1 << (7 - (route.Bits() % 8))
+	right := netip.PrefixFrom(netip.AddrFrom4(rightAddress), route.Bits()+1)
+	return append(manualSubtractIPv4Prefix(left, exclusion), manualSubtractIPv4Prefix(right, exclusion)...)
 }
 
 type listResponse struct {
