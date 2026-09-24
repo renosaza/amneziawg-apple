@@ -163,15 +163,15 @@ func (backend *tunnelBackend) start(config string, plan *routePlan) (Session, er
 		if parseErr != nil {
 			err = parseErr
 		} else {
-			backend.lastStartStage = "physical-endpoint"
-			process.precedenceEndpointRoute, err = configureSyntheticPrecedenceEndpointRoute(endpoint.String())
+			backend.lastStartStage = "utun-address"
+			process.route, err = configureIPv4AddressOnly(process, local.String())
+			if err == nil {
+				backend.lastStartStage = "physical-endpoint"
+				process.precedenceEndpointRoute, err = configureSyntheticPrecedenceEndpointRoute(endpoint.String())
+			}
 			if err == nil {
 				backend.lastStartStage = "split-route"
 				process.fallbackRoute, err = configureSyntheticSplitRoute(process, prefix)
-			}
-			if err == nil {
-				backend.lastStartStage = "utun-address"
-				process.route, err = configureIPv4AddressOnly(process, local.String())
 			}
 			if err == nil {
 				err = process.precedenceEndpointRoute.verify()
