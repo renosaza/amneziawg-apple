@@ -22,6 +22,24 @@ import (
 
 const maxFrameBytes = 4 * 1024
 
+const manualRoutePlanProfileID = "11111111-2222-4333-8444-555555555555"
+
+var manualRoutePlanRequest = struct {
+	Version   int             `json:"version"`
+	Operation string          `json:"operation"`
+	ProfileID string          `json:"profile_id"`
+	Config    string          `json:"config,omitempty"`
+	RoutePlan json.RawMessage `json:"route_plan,omitempty"`
+}{
+	Version:   1,
+	Operation: "start",
+	ProfileID: manualRoutePlanProfileID,
+	Config: "private_key=1111111111111111111111111111111111111111111111111111111111111111\n" +
+		"public_key=2222222222222222222222222222222222222222222222222222222222222222\n" +
+		"allowed_ip=198.51.100.0/24\nendpoint=198.51.100.10:1",
+	RoutePlan: json.RawMessage(`{"local_address":"192.0.2.2/32","routes":[{"destination":"198.51.100.0/24","owner":"tunnel"},{"destination":"198.51.100.10/32","owner":"physicalEndpoint"}]}`),
+}
+
 func main() {
 	socket := flag.String("socket", "", "root-owned directory socket path")
 	uidText := flag.String("uid", "", "authorized non-root macOS UID")
@@ -29,15 +47,37 @@ func main() {
 	allowRoutePlans := flag.Bool("allow-route-plan-runtime", false, "enable the experimental root-controlled route-plan runtime")
 	checkIdle := flag.Bool("check-idle", false, "exit successfully only when the daemon has no sessions")
 	prepareStop := flag.Bool("prepare-stop", false, "atomically refuse new sessions when the daemon is idle")
+	manualRoutePlanStart := flag.Bool("manual-route-plan-start", false, "send the fixed synthetic route-plan start request")
+	manualRoutePlanStop := flag.Bool("manual-route-plan-stop", false, "stop the fixed synthetic route-plan session")
 	flag.Parse()
-	if *checkIdle || *prepareStop {
+	if *checkIdle || *prepareStop || *manualRoutePlanStart || *manualRoutePlanStop {
 		if flag.NArg() != 0 || *socket == "" || *uidText != "" || *binaryPath != "" {
-			fmt.Fprintln(os.Stderr, "usage: daemon-control-poc -check-idle|-prepare-stop -socket /var/run/name.sock")
+			fmt.Fprintln(os.Stderr, "usage: daemon-control-poc -check-idle|-prepare-stop|-manual-route-plan-start|-manual-route-plan-stop -socket /var/run/name.sock")
 			os.Exit(2)
 		}
-		if *checkIdle == *prepareStop {
+		operations := 0
+		for _, selected := range []bool{*checkIdle, *prepareStop, *manualRoutePlanStart, *manualRoutePlanStop} {
+			if selected {
+				operations++
+			}
+		}
+		if operations != 1 {
 			fmt.Fprintln(os.Stderr, "choose exactly one control operation")
 			os.Exit(2)
+		}
+		if *manualRoutePlanStart {
+			if err := daemonManualRoutePlanStart(*socket); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
+		}
+		if *manualRoutePlanStop {
+			if err := daemonManualRoutePlanStop(*socket); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
 		}
 		operation := "list"
 		if *prepareStop {
@@ -102,10 +142,49 @@ func main() {
 }
 
 type listResponse struct {
-	OK       bool `json:"ok"`
+	OK              bool `json:"ok"`
+	ProtocolVersion int  `json:"protocol_version,omitempty"`
+	Profile         *struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	} `json:"profile,omitempty"`
 	Profiles []struct {
 		ID string `json:"id"`
 	} `json:"profiles"`
+}
+
+func daemonManualRoutePlanStart(socket string) error {
+	if err := daemonHello(socket); err != nil {
+		return err
+	}
+	response, err := daemonExchange(socket, manualRoutePlanRequest)
+	if err != nil || response.Profile == nil || response.Profile.ID != manualRoutePlanProfileID || response.Profile.Status != "running" {
+		return errors.New("daemon synthetic route-plan start failed")
+	}
+	return nil
+}
+
+func daemonManualRoutePlanStop(socket string) error {
+	if err := daemonHello(socket); err != nil {
+		return err
+	}
+	response, err := daemonExchange(socket, struct {
+		Version   int    `json:"version"`
+		Operation string `json:"operation"`
+		ProfileID string `json:"profile_id"`
+	}{Version: 1, Operation: "stop", ProfileID: manualRoutePlanProfileID})
+	if err != nil || response.Profile == nil || response.Profile.ID != manualRoutePlanProfileID || response.Profile.Status != "stopped" {
+		return errors.New("daemon synthetic route-plan stop failed")
+	}
+	return nil
+}
+
+func daemonHello(socket string) error {
+	hello, err := daemonRequest(socket, "hello")
+	if err != nil || hello.ProtocolVersion != 1 || hello.Profile != nil || len(hello.Profiles) != 0 {
+		return errors.New("daemon hello failed")
+	}
+	return nil
 }
 
 // daemonIsIdle sends only the existing list request and never prints profile IDs.
@@ -122,6 +201,13 @@ func daemonIsIdle(socket string) error {
 
 // daemonRequest sends only a fixed, keyless control operation.
 func daemonRequest(socket, operation string) (listResponse, error) {
+	return daemonExchange(socket, struct {
+		Version   int    `json:"version"`
+		Operation string `json:"operation"`
+	}{Version: 1, Operation: operation})
+}
+
+func daemonExchange(socket string, request any) (listResponse, error) {
 	if !filepath.IsAbs(socket) || filepath.Clean(socket) != socket || len(socket) > 103 {
 		return listResponse{}, errors.New("invalid control socket path")
 	}
@@ -133,14 +219,11 @@ func daemonRequest(socket, operation string) (listResponse, error) {
 	if err := connection.SetDeadline(time.Now().Add(time.Second)); err != nil {
 		return listResponse{}, err
 	}
-	request, err := json.Marshal(struct {
-		Version   int    `json:"version"`
-		Operation string `json:"operation"`
-	}{Version: 1, Operation: operation})
+	frame, err := json.Marshal(request)
 	if err != nil {
 		return listResponse{}, err
 	}
-	if err := writeFrame(connection, request); err != nil {
+	if err := writeFrame(connection, frame); err != nil {
 		return listResponse{}, errors.New("daemon control request failed")
 	}
 	responseFrame, err := readFrame(connection)

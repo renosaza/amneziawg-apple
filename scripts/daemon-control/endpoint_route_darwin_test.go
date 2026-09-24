@@ -75,6 +75,17 @@ func TestSyntheticPhysicalEndpointOwnership(t *testing.T) {
 	if configured.ownsRoute(&nonStatic) {
 		t.Fatal("accepted non-static endpoint route")
 	}
+	ribOwned := *owned
+	ribOwned.Addrs = append([]route.Addr(nil), owned.Addrs...)
+	ribOwned.Addrs[syscall.RTAX_IFP] = nil
+	if !configured.ownsRIBRouteWithInterfaceByIndex(&ribOwned, func(index int) (*net.Interface, error) {
+		if index != configured.iface.Index {
+			t.Fatalf("lookup index = %d", index)
+		}
+		return configured.iface, nil
+	}) {
+		t.Fatal("did not recognize owned endpoint route without RIB interface metadata")
+	}
 	lookup := effectiveRouteLookupAddrs(configured.target)
 	if _, ok := lookup[syscall.RTAX_IFP].(*route.LinkAddr); !ok || lookup[syscall.RTAX_NETMASK] != nil {
 		t.Fatal("effective lookup did not request only destination and interface metadata")

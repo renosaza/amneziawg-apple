@@ -353,6 +353,15 @@ func (configured *PhysicalEndpointRoute) ownsRoute(message *route.RouteMessage) 
 	return gatewayOK && interfaceOK && gateway.IP == configured.gateway.As4() && interfaceAddress.Index == configured.iface.Index && interfaceAddress.Name == configured.iface.Name
 }
 
+func (configured *PhysicalEndpointRoute) ownsRIBRoute(message *route.RouteMessage) bool {
+	return configured.ownsRIBRouteWithInterfaceByIndex(message, net.InterfaceByIndex)
+}
+
+func (configured *PhysicalEndpointRoute) ownsRIBRouteWithInterfaceByIndex(message *route.RouteMessage, interfaceByIndex func(int) (*net.Interface, error)) bool {
+	return configured.isTargetHostRoute(message) && message.Flags&(syscall.RTF_STATIC|syscall.RTF_GATEWAY) == syscall.RTF_STATIC|syscall.RTF_GATEWAY &&
+		matchesRIBPhysicalRoute(message, configured.gateway, configured.iface, interfaceByIndex)
+}
+
 func (configured *PhysicalEndpointRoute) isTargetHostRoute(message *route.RouteMessage) bool {
 	destination, destinationOK := routeAddress(message, syscall.RTAX_DST).(*route.Inet4Addr)
 	return destinationOK && message.Flags&(syscall.RTF_UP|syscall.RTF_HOST) == syscall.RTF_UP|syscall.RTF_HOST && destination.IP == configured.target.As4()

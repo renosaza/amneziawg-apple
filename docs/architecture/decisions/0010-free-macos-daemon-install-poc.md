@@ -40,9 +40,15 @@ session from racing the subsequent stop. Before bootstrap it may remove only an 
 closed. After that proof, `launchctl bootout` asks the daemon to clean its own
 children and socket before files are removed.
 
-The manual GitHub workflow builds synthetic binaries, installs them, verifies
-idle status, uninstalls them, and checks the stable paths are gone. Fresh-install failure removes partial files so retry is possible. Update is intentionally unsupported. It does not
-send traffic or publish artifacts.
+The manual GitHub workflow builds synthetic binaries, installs them with the
+root-controlled route-plan flag, sends authenticated framed `hello` and one
+fixed TEST-NET start request as the allowed UID, verifies the split target uses
+the new `utun` and the endpoint remains on a physical interface, stops the
+session, uninstalls, and checks the stable paths are gone. Cleanup attempts
+both stop and uninstall on failure, logs cleanup errors, and fails when the
+service, paths, or effective TEST-NET POC routes remain. Fresh-install failure
+removes partial files so retry is possible. Update is intentionally unsupported.
+It does not send traffic or publish artifacts.
 
 ## Consequences
 
