@@ -10,6 +10,9 @@ output=${1:-"$root/out"}
 configuration=Release
 working=$(mktemp -d "${TMPDIR:-/tmp}/amneziawg-package-build.XXXXXX")
 build_products="$working/build-products"
+sparkle_update_output=${SPARKLE_UPDATE_OUTPUT:-}
+sparkle_feed_url=${SPARKLE_FEED_URL:-}
+sparkle_public_ed_key=${SPARKLE_PUBLIC_ED_KEY:-}
 
 fail() {
     printf 'unsigned macOS package: %s\n' "$*" >&2
@@ -18,6 +21,27 @@ fail() {
 
 [[ $(/usr/bin/uname -s) == Darwin ]] || fail 'macOS is required'
 [[ -f "$root/Sources/WireGuardApp/Config/Developer.xcconfig" ]] || fail 'create Developer.xcconfig from its tracked template first'
+
+if [[ -n $sparkle_feed_url || -n $sparkle_public_ed_key ]]; then
+    [[ $sparkle_feed_url =~ ^https://[^[:space:]]+$ ]] || fail 'SPARKLE_FEED_URL must be an HTTPS URL'
+    SPARKLE_PUBLIC_ED_KEY="$sparkle_public_ed_key" python3 - <<'PY'
+import base64
+import os
+
+try:
+    assert len(base64.b64decode(os.environ["SPARKLE_PUBLIC_ED_KEY"], validate=True)) == 32
+except (AssertionError, ValueError):
+    raise SystemExit("SPARKLE_PUBLIC_ED_KEY must be a base64 Ed25519 public key")
+PY
+else
+    sparkle_feed_url=""
+    sparkle_public_ed_key=""
+fi
+
+if [[ -n $sparkle_update_output ]]; then
+    [[ $sparkle_update_output != *$'\n'* ]] || fail 'SPARKLE_UPDATE_OUTPUT contains a newline'
+    mkdir -p "$sparkle_update_output"
+fi
 
 mkdir -p "$output"
 trap 'rm -rf "$working"' EXIT
@@ -38,6 +62,10 @@ xcodebuild -project "$root/WireGuard.xcodeproj" \
     SYMROOT="$build_products" \
     CODE_SIGNING_ALLOWED=NO \
     CODE_SIGNING_REQUIRED=NO \
+    SPARKLE_FEED_URL="$sparkle_feed_url" \
+    SPARKLE_PUBLIC_ED_KEY="$sparkle_public_ed_key" \
+    INFOPLIST_KEY_SUFeedURL="$sparkle_feed_url" \
+    INFOPLIST_KEY_SUPublicEDKey="$sparkle_public_ed_key" \
     build
 
 app_source="$build_products/$configuration/AmneziaWG.app"
@@ -58,6 +86,10 @@ trap cleanup EXIT
 
 mkdir -p "$package_root/Daemon"
 ditto "$app_source" "$package_root/AmneziaWG.app"
+if [[ -n $sparkle_feed_url ]]; then
+    SPARKLE_FEED_URL="$sparkle_feed_url" SPARKLE_PUBLIC_ED_KEY="$sparkle_public_ed_key" \
+        python3 "$root/scripts/stage-sparkle-info-plist.py" "$package_root/AmneziaWG.app/Contents/Info.plist"
+fi
 # This is an ad-hoc signature only. It establishes no developer identity and
 # does not avoid Gatekeeper approval on another Mac.
 codesign --force --deep --sign - --timestamp=none "$package_root/AmneziaWG.app"
@@ -148,4 +180,9 @@ print(json.dumps({
 PY
 
 ditto -c -k --sequesterRsrc --keepParent "$package_root" "$output/$archive_name"
+if [[ -n $sparkle_update_output ]]; then
+    update_archive="AmneziaWG-${version}-${build}.app.zip"
+    ditto -c -k --sequesterRsrc --keepParent "$package_root/AmneziaWG.app" "$sparkle_update_output/$update_archive"
+    printf '%s\n' "$sparkle_update_output/$update_archive"
+fi
 printf '%s\n' "$output/$archive_name"

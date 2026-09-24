@@ -40,6 +40,11 @@ jobs:
         run: scripts/test-daemon-control-client.sh
       - name: Test unsigned daemon GUI target boundaries
         run: scripts/test-unsigned-daemon-gui-target.sh
+      - name: Test unsigned macOS release workflow boundaries
+        run: scripts/test-unsigned-macos-release-workflow.sh
+
+      - name: Test Sparkle staged Info.plist
+        run: scripts/test-sparkle-staged-info-plist.sh
       - name: Compile macOS application targets without signing
         shell: bash
         run: |
@@ -53,8 +58,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          scripts/package-unsigned-macos-daemon.sh "$RUNNER_TEMP/unsigned-macos-package"
+          SPARKLE_FEED_URL=https://example.invalid/appcast.xml \
+          SPARKLE_PUBLIC_ED_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
+          SPARKLE_UPDATE_OUTPUT="$RUNNER_TEMP/unsigned-macos-package" \
+            scripts/package-unsigned-macos-daemon.sh "$RUNNER_TEMP/unsigned-macos-package"
           scripts/test-unsigned-macos-package.sh "$RUNNER_TEMP"/unsigned-macos-package/AmneziaWG-unsigned-macos-*.zip
+          scripts/test-sparkle-app-update.sh "$RUNNER_TEMP"/unsigned-macos-package/AmneziaWG-*.app.zip
       - name: Upload unsigned macOS daemon package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
