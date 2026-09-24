@@ -48,6 +48,17 @@ grep -Eq 'store\.delete\(' "$manager"
 grep -Eq 'guard tunnel\.status == \.inactive else' "$manager"
 grep -Eq 'uncertainDaemonProfileIDs\.remove\(profileID\)' "$manager"
 grep -Eq 'DaemonTunnelState\.isAuthoritativelyAbsent' "$manager"
+python3 - "$manager" <<'PY'
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1]).read_text()
+deactivation = source.split('    override func startDeactivation(of tunnel: TunnelContainer) {', 1)[1].split('    override func refreshStatuses()', 1)[0]
+assert 'let knownProfileIDs = Set(tunnels.compactMap(\\.daemonProfileID))\n        mutationQueue.async' in deactivation
+queue_body = deactivation.split('mutationQueue.async', 1)[1]
+assert 'knownProfileIDs: knownProfileIDs' in queue_body
+assert 'self.tunnels.compactMap(\\.daemonProfileID)' not in queue_body
+PY
 grep -Fq 'tunnelsManager.refreshStatuses()' "$detail_controller"
 grep -Fq 'func handleStopReassertingAction()' "$detail_controller"
 grep -Fq 'tunnelsManager.startDeactivation(of: tunnel)' "$detail_controller"

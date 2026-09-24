@@ -443,6 +443,7 @@ final class DaemonTunnelsManager: TunnelsManager {
             "id": diagnosticID, "from": "active", "to": "deactivating"
         ])
         DaemonDiagnostics.recordStage(diagnosticID, stage: "deactivation", outcome: "started")
+        let knownProfileIDs = Set(tunnels.compactMap(\.daemonProfileID))
         mutationQueue.async { [weak self, weak tunnel] in
             guard let self else { return }
             do {
@@ -467,7 +468,7 @@ final class DaemonTunnelsManager: TunnelsManager {
                     if DaemonTunnelState.isAuthoritativelyAbsent(
                         profileID: profileID,
                         statuses: statuses,
-                        knownProfileIDs: Set(self.tunnels.compactMap(\.daemonProfileID))
+                        knownProfileIDs: knownProfileIDs
                     ) {
                         self.uncertainDaemonProfileIDs.remove(profileID)
                         refreshedStatus = .inactive
