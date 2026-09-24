@@ -16,7 +16,12 @@ import (
 
 var syntheticFallbackMask = [4]byte{255, 255, 255, 0}
 
-// SyntheticFallbackRoute owns the narrow fallback prefix for the precedence POC.
+var syntheticSplitPrefixes = []netip.Prefix{
+	syntheticPrecedencePrefix,
+	netip.MustParsePrefix("192.0.2.200/32"),
+}
+
+// SyntheticFallbackRoute owns one fixed TEST-NET split prefix for the manual POC.
 type SyntheticFallbackRoute struct {
 	name     string
 	prefix   netip.Prefix
@@ -25,14 +30,21 @@ type SyntheticFallbackRoute struct {
 }
 
 func configureSyntheticFallbackRoute(process *tunnelProcess) (*SyntheticFallbackRoute, error) {
+	return configureSyntheticSplitRoute(process, syntheticPrecedencePrefix)
+}
+
+func configureSyntheticSplitRoute(process *tunnelProcess, prefix netip.Prefix) (*SyntheticFallbackRoute, error) {
 	if process == nil || os.Geteuid() != 0 || !utunName.MatchString(process.name) {
 		return nil, errors.New("synthetic fallback route requires root and a utun")
+	}
+	if !prefix.Addr().Is4() || prefix != prefix.Masked() || (prefix.Bits() != 24 && prefix.Bits() != 32) || !(syntheticPrecedencePrefix.Contains(prefix.Addr()) || syntheticIPv4Prefix.Contains(prefix.Addr())) {
+		return nil, errors.New("synthetic split route must be a canonical TEST-NET /24 or /32")
 	}
 	iface, err := net.InterfaceByName(process.name)
 	if err != nil {
 		return nil, err
 	}
-	configured := &SyntheticFallbackRoute{name: process.name, prefix: syntheticPrecedencePrefix, iface: iface}
+	configured := &SyntheticFallbackRoute{name: process.name, prefix: prefix, iface: iface}
 	existing, err := configured.lookup()
 	if err != nil || existing.Err != nil {
 		return nil, errors.Join(err, existing.Err)
@@ -121,7 +133,11 @@ func (configured *SyntheticFallbackRoute) proveAbsentAfterTunnelExit() error {
 }
 
 func (configured *SyntheticFallbackRoute) write(kind int) error {
-	message, err := requestRouteMessage(kind, syscall.RTF_UP|syscall.RTF_STATIC, configured.routeAddrs())
+	flags := syscall.RTF_UP | syscall.RTF_STATIC
+	if configured.prefix.Bits() == 32 {
+		flags |= syscall.RTF_HOST
+	}
+	message, err := requestRouteMessage(kind, flags, configured.routeAddrs())
 	if err != nil {
 		configured.recordRouteWrite(kind, err)
 		return err
@@ -153,6 +169,9 @@ func (configured *SyntheticFallbackRoute) lookup() (*route.RouteMessage, error) 
 }
 
 func (configured *SyntheticFallbackRoute) probe() netip.Addr {
+	if configured.prefix.Bits() == 32 {
+		return configured.prefix.Addr()
+	}
 	return configured.prefix.Addr().Next()
 }
 
@@ -160,7 +179,7 @@ func (configured *SyntheticFallbackRoute) routeAddrs() []route.Addr {
 	addrs := make([]route.Addr, syscall.RTAX_IFP+1)
 	addrs[syscall.RTAX_DST] = &route.Inet4Addr{IP: configured.prefix.Addr().As4()}
 	addrs[syscall.RTAX_GATEWAY] = &route.LinkAddr{Index: configured.iface.Index, Name: configured.name}
-	addrs[syscall.RTAX_NETMASK] = &route.Inet4Addr{IP: syntheticFallbackMask}
+	addrs[syscall.RTAX_NETMASK] = &route.Inet4Addr{IP: prefixMask(configured.prefix)}
 	addrs[syscall.RTAX_IFP] = &route.LinkAddr{Index: configured.iface.Index, Name: configured.name}
 	return addrs
 }
@@ -176,7 +195,18 @@ func (configured *SyntheticFallbackRoute) ownsRoute(message *route.RouteMessage)
 
 func (configured *SyntheticFallbackRoute) isFallbackRoute(message *route.RouteMessage) bool {
 	prefix, ok := routePrefix(message)
-	return ok && message.Flags&syscall.RTF_UP != 0 && message.Flags&syscall.RTF_HOST == 0 && prefix == configured.prefix
+	if !ok || message.Flags&syscall.RTF_UP == 0 || prefix != configured.prefix {
+		return false
+	}
+	if configured.prefix.Bits() == 32 {
+		return message.Flags&syscall.RTF_HOST != 0
+	}
+	return message.Flags&syscall.RTF_HOST == 0
+}
+
+func prefixMask(prefix netip.Prefix) [4]byte {
+	mask := net.CIDRMask(prefix.Bits(), 32)
+	return [4]byte{mask[0], mask[1], mask[2], mask[3]}
 }
 
 func (configured *SyntheticFallbackRoute) isMoreSpecificRoute(message *route.RouteMessage) bool {

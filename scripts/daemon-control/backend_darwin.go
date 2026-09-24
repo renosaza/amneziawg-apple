@@ -43,6 +43,7 @@ type tunnelBackend struct {
 	syntheticFallbackRoute  bool
 	routesMu                sync.Mutex
 	routeSlots              [len(syntheticIPv4RouteSpecs)]bool
+	lastStartStage          string
 }
 type tunnelProcess struct {
 	command                 *exec.Cmd
@@ -92,6 +93,7 @@ func trustedBinary(path string) bool {
 }
 
 func (backend *tunnelBackend) Start(config string) (Session, error) {
+	backend.lastStartStage = "utun"
 	baseline, err := currentUtuns()
 	if err != nil {
 		return Session{}, err
@@ -118,15 +120,19 @@ func (backend *tunnelBackend) Start(config string) (Session, error) {
 	name, err := waitForTunnel(process, nameFile)
 	if err == nil {
 		process.name = name
+		backend.lastStartStage = "uapi"
 		err = uapi(name, "set=1\n"+config)
 	}
 	if err == nil && backend.syntheticIPv4Routes {
+		backend.lastStartStage = "utun-address"
 		err = backend.configureSyntheticIPv4Route(process)
 	}
 	if err == nil && backend.syntheticEndpointRoutes {
+		backend.lastStartStage = "endpoint"
 		err = backend.configureSyntheticEndpointRoute(process)
 	}
 	if err == nil && backend.syntheticFallbackRoute {
+		backend.lastStartStage = "split-route"
 		err = backend.configureSyntheticFallbackRoute(process)
 	}
 	if err != nil {
@@ -135,6 +141,7 @@ func (backend *tunnelBackend) Start(config string) (Session, error) {
 		}
 		return Session{}, err
 	}
+	backend.lastStartStage = ""
 	return Session{value: process}, nil
 }
 
@@ -269,15 +276,17 @@ func (backend *tunnelBackend) configureSyntheticEndpointRoute(process *tunnelPro
 }
 
 func (backend *tunnelBackend) configureSyntheticFallbackRoute(process *tunnelProcess) error {
-	if process.routeSlot != 0 {
+	if process.routeSlot < 0 || process.routeSlot >= len(syntheticSplitPrefixes) {
 		return nil
 	}
-	endpointRoute, err := configureSyntheticPrecedenceEndpointRoute(syntheticPrecedenceEndpointTarget)
-	process.precedenceEndpointRoute = endpointRoute
-	if err != nil {
-		return err
+	if process.routeSlot == 0 {
+		endpointRoute, err := configureSyntheticPrecedenceEndpointRoute(syntheticPrecedenceEndpointTarget)
+		process.precedenceEndpointRoute = endpointRoute
+		if err != nil {
+			return err
+		}
 	}
-	route, err := configureSyntheticFallbackRoute(process)
+	route, err := configureSyntheticSplitRoute(process, syntheticSplitPrefixes[process.routeSlot])
 	process.fallbackRoute = route
 	return err
 }

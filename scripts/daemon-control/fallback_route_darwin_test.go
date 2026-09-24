@@ -36,6 +36,15 @@ func TestSyntheticFallbackRouteOwnership(t *testing.T) {
 	if configured.isFallbackRoute(&host) {
 		t.Fatal("accepted a host route as fallback")
 	}
+	hostPrefix := &SyntheticFallbackRoute{prefix: netip.MustParsePrefix("198.51.100.11/32")}
+	nonHost := fallbackRouteMessage(7, syscall.RTF_UP|syscall.RTF_STATIC, hostPrefix.prefix.Addr().As4(), [4]byte{255, 255, 255, 255}, "utun7")
+	if hostPrefix.isFallbackRoute(nonHost) {
+		t.Fatal("accepted a non-host route as /32 split route")
+	}
+	nonHost.Flags |= syscall.RTF_HOST
+	if !hostPrefix.isFallbackRoute(nonHost) {
+		t.Fatal("rejected a host route as /32 split route")
+	}
 	shadow := fallbackRouteMessage(8, syscall.RTF_UP|syscall.RTF_HOST, configured.probe().As4(), [4]byte{}, "utun8")
 	if !configured.isMoreSpecificRoute(shadow) {
 		t.Fatal("did not reject a foreign host route shadowing the fallback probe")
@@ -88,6 +97,22 @@ func TestSyntheticFallbackRetainsUnknownAddOutcome(t *testing.T) {
 	configured.recordRouteWrite(syscall.RTM_ADD, syscall.EEXIST)
 	if configured.routeSet {
 		t.Fatal("retained fallback recovery state after a kernel-rejected add")
+	}
+}
+
+func TestSyntheticSplitRouteSupportsCanonicalPrefixSizes(t *testing.T) {
+	for _, prefix := range []netip.Prefix{netip.MustParsePrefix("198.51.100.0/24"), netip.MustParsePrefix("198.51.100.11/32")} {
+		configured := &SyntheticFallbackRoute{prefix: prefix}
+		if configured.probe() != prefix.Addr() && prefix.Bits() == 32 {
+			t.Fatal("host route probe changed destination")
+		}
+		expected := [4]byte{255, 255, 255, 0}
+		if prefix.Bits() == 32 {
+			expected[3] = 255
+		}
+		if prefixMask(prefix) != expected {
+			t.Fatalf("wrong mask for %s", prefix)
+		}
 	}
 }
 
