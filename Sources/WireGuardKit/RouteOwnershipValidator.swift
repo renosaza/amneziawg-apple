@@ -69,8 +69,10 @@ public struct MacOSDaemonRoutePlan: Codable, Equatable {
         let peer = configuration.peers[0]
         guard peer.excludeIPs.isEmpty,
               peer.allowedIPs.count == 1,
-              peer.allowedIPs[0].address is IPv4Address,
-              (2 ... 32).contains(peer.allowedIPs[0].networkPrefixLength),
+              let allowedIP = peer.allowedIPs.first,
+              let routeAddress = allowedIP.address as? IPv4Address,
+              isUsableIPv4Address(routeAddress),
+              (2 ... 32).contains(allowedIP.networkPrefixLength),
               let endpoint = peer.endpoint,
               case .ipv4(let endpointAddress) = endpoint.host,
               isUsableIPv4Address(endpointAddress)

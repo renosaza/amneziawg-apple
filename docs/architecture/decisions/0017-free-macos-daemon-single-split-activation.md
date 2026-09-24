@@ -49,7 +49,7 @@ are unchanged.
 
 This is a client lifecycle slice. Native address and route mutation remains solely
 with the separately installed, root-controlled daemon backend. That backend is opt-in
-default-off and validates the same one-peer, one global-unicast IPv4 endpoint, one
+default-off and validates the same one-peer, one usable IPv4 endpoint, one usable
 `/2` through `/32` IPv4 tunnel route, one local `/32`, and one physical endpoint `/32`
 contract before it creates a `utun` or applies route state. DNS, PF, gateways,
 concurrent profiles, on-demand, and release delivery remain outside this decision.
