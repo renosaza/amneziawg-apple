@@ -48,6 +48,8 @@ type tunnelBackend struct {
 	routesMu                sync.Mutex
 	routeSlots              [len(syntheticIPv4RouteSpecs)]bool
 	lastStartStage          string
+	diagnostics             Diagnostics
+	operationID             string
 }
 type tunnelProcess struct {
 	command                 *exec.Cmd
@@ -126,6 +128,52 @@ func (backend *tunnelBackend) capabilities() []string {
 	return nil
 }
 
+func (backend *tunnelBackend) SetDiagnostics(diagnostics Diagnostics) {
+	backend.diagnostics = diagnostics
+}
+
+func (backend *tunnelBackend) SetDiagnosticOperationID(operationID string) {
+	backend.operationID = operationID
+}
+
+func (backend *tunnelBackend) event(event DiagnosticEvent) {
+	if backend.diagnostics != nil {
+		if event.OperationID == "" {
+			event.OperationID = backend.operationID
+		}
+		backend.diagnostics.Event(event)
+	}
+}
+
+func (backend *tunnelBackend) routeEvent(process *tunnelProcess, stage, owner, result string, route *PhysicalEndpointRoute) {
+	event := DiagnosticEvent{Event: "route", Stage: stage, RouteOwner: owner, Result: result}
+	if process != nil {
+		event.Session = process.name
+	}
+	if route != nil {
+		base := route.currentBase()
+		event.Prefix, event.Endpoint = base.prefix.String(), route.target.String()
+		if base.iface != nil {
+			event.Interface = base.iface.Name
+		}
+	}
+	backend.event(event)
+}
+
+func (backend *tunnelBackend) splitRouteEvent(process *tunnelProcess, route *SyntheticFallbackRoute, result string) {
+	event := DiagnosticEvent{Event: "route", Stage: "split_route", RouteOwner: "tunnel", Result: result}
+	if process != nil {
+		event.Session = process.name
+	}
+	if route != nil {
+		event.Prefix = route.prefix.String()
+		if route.iface != nil {
+			event.Interface = route.iface.Name
+		}
+	}
+	backend.event(event)
+}
+
 func isManualRoutePlan(plan routePlan) bool {
 	if plan.LocalAddress != "192.0.2.2/32" {
 		return false
@@ -175,6 +223,7 @@ func (backend *tunnelBackend) start(config string, plan *routePlan) (Session, er
 	name, err := waitForTunnel(process, nameFile)
 	if err == nil {
 		process.name = name
+		backend.event(DiagnosticEvent{Event: "start", Session: name, Stage: "utun", Result: "ready"})
 		backend.lastStartStage = "uapi"
 		err = uapi(name, "set=1\n"+config)
 	}
@@ -190,8 +239,8 @@ func (backend *tunnelBackend) start(config string, plan *routePlan) (Session, er
 			if err == nil {
 				backend.lastStartStage = "physical-endpoint"
 				process.precedenceEndpointRoute, err = configurePlannedPhysicalEndpointRoute(endpoint)
-				if err != nil {
-					backend.lastStartStage = strings.Split(err.Error(), ":")[0]
+				if err == nil {
+					backend.routeEvent(process, "physical_endpoint", "physical_endpoint", "selected", process.precedenceEndpointRoute)
 				}
 			}
 			if err == nil {
@@ -201,6 +250,9 @@ func (backend *tunnelBackend) start(config string, plan *routePlan) (Session, er
 				} else {
 					backend.lastStartStage = "split-route"
 					process.fallbackRoute, err = configurePlannedSplitRoute(process, routes[0], process.precedenceEndpointRoute)
+					if err == nil {
+						backend.splitRouteEvent(process, process.fallbackRoute, "selected")
+					}
 				}
 			}
 			if err == nil {
@@ -234,12 +286,15 @@ func (backend *tunnelBackend) start(config string, plan *routePlan) (Session, er
 		err = backend.configureSyntheticFallbackRoute(process)
 	}
 	if err != nil {
+		backend.event(DiagnosticEvent{Event: "start", Session: process.name, Stage: backend.lastStartStage, Class: "start_failed", Code: diagnosticErrorCode(err), Result: "failed"})
 		if cleanupErr := backend.Stop(Session{value: process}); cleanupErr != nil {
+			backend.event(DiagnosticEvent{Event: "cleanup", Session: process.name, Stage: "cleanup", Class: "cleanup_failed", Code: diagnosticErrorCode(cleanupErr), Result: "pending"})
 			return Session{value: process}, errors.Join(err, cleanupErr)
 		}
 		return Session{}, err
 	}
 	backend.lastStartStage = ""
+	backend.event(DiagnosticEvent{Event: "start", Session: process.name, Stage: "backend", Result: "running"})
 	return Session{value: process}, nil
 }
 
@@ -310,16 +365,22 @@ func (backend *tunnelBackend) Rebind(session Session) error {
 	}
 	if err != nil {
 		process.degraded = true
+		backend.event(DiagnosticEvent{Event: "rebind", Session: process.name, Stage: "physical_endpoint", Class: "rebind_failed", Code: diagnosticErrorCode(err), Result: "degraded"})
+		backend.routeEvent(process, "physical_endpoint", "physical_endpoint", "degraded", process.precedenceEndpointRoute)
 		return err
 	}
 	if process.needsEndpointRefresh(changed) {
 		if err := uapi(process.name, "set=1\npublic_key="+process.peerPublicKey+"\nendpoint="+process.peerEndpoint); err != nil {
 			process.degraded = true
+			backend.event(DiagnosticEvent{Event: "rebind", Session: process.name, Stage: "uapi_endpoint", Class: "endpoint_refresh_failed", Code: diagnosticErrorCode(err), Result: "pending", Pending: true})
 			return err
 		}
 		process.endpointRefreshPending = false
 	}
 	process.degraded = false
+	if changed {
+		backend.routeEvent(process, "physical_endpoint", "physical_endpoint", "rebound", process.precedenceEndpointRoute)
+	}
 	return nil
 }
 
@@ -361,6 +422,7 @@ func (backend *tunnelBackend) Stop(session Session) error {
 	if !ok || process.command.Process == nil {
 		return errors.New("invalid tunnel session")
 	}
+	backend.event(DiagnosticEvent{Event: "stop", Session: process.name, Stage: "cleanup", Result: "attempt"})
 	select {
 	case <-process.done:
 		if err := process.proveFullRoutesAbsentAfterTunnelExit(); err != nil {
@@ -428,6 +490,7 @@ func (backend *tunnelBackend) Stop(session Session) error {
 		return err
 	}
 	backend.releaseRouteSlot(process)
+	backend.event(DiagnosticEvent{Event: "stop", Session: process.name, Stage: "cleanup", Result: "stopped"})
 	return nil
 }
 

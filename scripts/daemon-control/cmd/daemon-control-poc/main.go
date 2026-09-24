@@ -100,6 +100,9 @@ func main() {
 	allowRoutePlans := flag.Bool("allow-route-plan-runtime", false, "enable the experimental root-controlled route-plan runtime")
 	allowFullRoutes := flag.Bool("allow-full-route-runtime", false, "enable experimental logical IPv4 full-route plans (requires -allow-route-plan-runtime)")
 	allowNetworkRebind := flag.Bool("allow-route-plan-network-rebind", false, "poll and rebind experimental route-plan endpoint routes (requires -allow-route-plan-runtime)")
+	diagnostics := flag.Bool("diagnostics", false, "write secret-safe local diagnostic events to stderr")
+	diagnosticsEndpoints := flag.Bool("diagnostics-endpoints", false, "include endpoint IP addresses in local diagnostics (requires -diagnostics)")
+	diagnosticsLog := flag.String("diagnostics-log", "", "write diagnostics only to the fixed root-owned local log (requires -diagnostics)")
 	checkIdle := flag.Bool("check-idle", false, "exit successfully only when the daemon has no sessions")
 	prepareStop := flag.Bool("prepare-stop", false, "atomically refuse new sessions when the daemon is idle")
 	manualRoutePlanStart := flag.Bool("manual-route-plan-start", false, "send the fixed synthetic route-plan start request")
@@ -232,6 +235,14 @@ func main() {
 		fmt.Fprintln(os.Stderr, "route-plan runtime is required for full-route or network-rebind flags")
 		os.Exit(2)
 	}
+	if *diagnosticsEndpoints && !*diagnostics {
+		fmt.Fprintln(os.Stderr, "-diagnostics-endpoints requires -diagnostics")
+		os.Exit(2)
+	}
+	if *diagnosticsLog != "" && !*diagnostics {
+		fmt.Fprintln(os.Stderr, "-diagnostics-log requires -diagnostics")
+		os.Exit(2)
+	}
 	uid, err := parseUID(*uidText)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -246,6 +257,19 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
+	}
+	if *diagnostics {
+		var diagnosticWriter io.Writer = os.Stderr
+		if *diagnosticsLog != "" {
+			logFile, err := openBoundedDiagnosticLog(*diagnosticsLog)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "cannot enable diagnostics")
+				os.Exit(2)
+			}
+			defer logFile.Close()
+			diagnosticWriter = logFile
+		}
+		server.SetDiagnostics(daemoncontrol.NewDiagnostics(diagnosticWriter, *diagnosticsEndpoints))
 	}
 	listener, err := server.Listen(*socket)
 	if err != nil {

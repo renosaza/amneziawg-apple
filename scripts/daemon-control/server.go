@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -88,6 +89,35 @@ type Server struct {
 	closed      bool
 	planned     map[string]routePlanReservation
 	closeMu     sync.Mutex
+	diagnostics Diagnostics
+	operations  atomic.Uint64
+}
+
+// SetDiagnostics enables local structured diagnostics. It is intentionally
+// separate from IPC so an unprivileged client cannot turn logging on.
+func (server *Server) SetDiagnostics(diagnostics Diagnostics) {
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	server.diagnostics = diagnostics
+	if backend, ok := server.backend.(diagnosticBackend); ok {
+		backend.SetDiagnostics(diagnostics)
+	}
+}
+
+func (server *Server) event(event DiagnosticEvent) {
+	if server.diagnostics != nil {
+		server.diagnostics.Event(event)
+	}
+}
+
+func (server *Server) operationID(operation string) string {
+	return fmt.Sprintf("%s-%d", operation, server.operations.Add(1))
+}
+
+func (server *Server) setBackendOperation(operationID string) {
+	if backend, ok := server.backend.(diagnosticOperationBackend); ok {
+		backend.SetDiagnosticOperationID(operationID)
+	}
 }
 
 func NewServer(allowedUID uint32) (*Server, error) {
@@ -167,16 +197,22 @@ func (server *Server) apply(request request) response {
 		server.closed = true
 		return response{OK: true}
 	case "start":
+		operationID := server.operationID("start")
+		server.event(DiagnosticEvent{Event: "start", OperationID: operationID, Session: request.ProfileID, Stage: "validate", Result: "attempt"})
 		if _, found := server.profiles[request.ProfileID]; found {
+			server.event(DiagnosticEvent{Event: "start", OperationID: operationID, Session: request.ProfileID, Stage: "reservation", Class: "already_running", Code: "already_running", Result: "failed"})
 			return response{Error: "already_running"}
 		}
 		if len(server.profiles) == maxProfiles {
+			server.event(DiagnosticEvent{Event: "start", OperationID: operationID, Session: request.ProfileID, Stage: "reservation", Class: "capacity", Code: "capacity", Result: "failed"})
 			return response{Error: "capacity"}
 		}
 		if err := validRoutePlanMatchesConfig(request.RoutePlan, request.Config); err != nil {
+			server.event(DiagnosticEvent{Event: "start", OperationID: operationID, Session: request.ProfileID, Stage: "validate", Class: "invalid_request", Code: diagnosticErrorCode(err), Result: "failed"})
 			return response{Error: "invalid_request"}
 		}
 		if request.RoutePlan == nil && hasDefaultAllowedIP(request.Config) {
+			server.event(DiagnosticEvent{Event: "start", OperationID: operationID, Session: request.ProfileID, Stage: "validate", Class: "invalid_request", Code: "default_route_rejected", Result: "failed"})
 			return response{Error: "invalid_request"}
 		}
 		var reservation routePlanReservation
@@ -184,20 +220,26 @@ func (server *Server) apply(request request) response {
 			var err error
 			reservation, err = routePlanReservationFor(request.RoutePlan)
 			if err != nil {
+				server.event(DiagnosticEvent{Event: "start", OperationID: operationID, Session: request.ProfileID, Stage: "reservation", Class: "invalid_request", Code: "invalid_route_plan", Result: "failed"})
 				return response{Error: "invalid_request"}
 			}
 			if len(server.profiles) != len(server.planned) {
+				server.event(DiagnosticEvent{Event: "start", OperationID: operationID, Session: request.ProfileID, Stage: "reservation", Class: "unplanned_session_active", Code: "unplanned_session_active", Result: "failed"})
 				return response{Error: "unplanned_session_active"}
 			}
 			if conflict := server.plannedConflict(reservation); conflict != "" {
+				server.event(DiagnosticEvent{Event: "start", OperationID: operationID, Session: request.ProfileID, Stage: "reservation", Class: "route_conflict", Code: conflict, Result: "failed"})
 				return response{Error: conflict}
 			}
 			server.planned[request.ProfileID] = reservation
 		} else if len(server.planned) != 0 {
+			server.event(DiagnosticEvent{Event: "start", OperationID: operationID, Session: request.ProfileID, Stage: "reservation", Class: "planned_session_active", Code: "planned_session_active", Result: "failed"})
 			return response{Error: "planned_session_active"}
 		}
+		server.setBackendOperation(operationID)
 		session, err := server.start(request)
 		if err != nil {
+			server.event(DiagnosticEvent{Event: "start", OperationID: operationID, Session: request.ProfileID, Stage: "backend", Class: "start_failed", Code: diagnosticErrorCode(err), Result: "failed"})
 			if session.value != nil {
 				server.profiles[request.ProfileID] = session
 			} else if request.RoutePlan != nil {
@@ -206,17 +248,24 @@ func (server *Server) apply(request request) response {
 			return response{Error: "start_failed"}
 		}
 		server.profiles[request.ProfileID] = session
+		server.event(DiagnosticEvent{Event: "start", OperationID: operationID, Session: request.ProfileID, Stage: "backend", Result: "running"})
 		return response{OK: true, Profile: &Profile{ID: request.ProfileID, Status: "running"}}
 	case "stop":
+		operationID := server.operationID("stop")
 		session, found := server.profiles[request.ProfileID]
 		if !found {
+			server.event(DiagnosticEvent{Event: "stop", OperationID: operationID, Session: request.ProfileID, Stage: "lookup", Class: "not_found", Code: "not_found", Result: "failed"})
 			return response{Error: "not_found"}
 		}
+		server.event(DiagnosticEvent{Event: "stop", OperationID: operationID, Session: request.ProfileID, Stage: "cleanup", Result: "attempt"})
+		server.setBackendOperation(operationID)
 		if err := server.backend.Stop(session); err != nil {
+			server.event(DiagnosticEvent{Event: "stop", OperationID: operationID, Session: request.ProfileID, Stage: "cleanup", Class: "stop_failed", Code: diagnosticErrorCode(err), Result: "failed"})
 			return response{Error: "stop_failed"}
 		}
 		delete(server.profiles, request.ProfileID)
 		delete(server.planned, request.ProfileID)
+		server.event(DiagnosticEvent{Event: "stop", OperationID: operationID, Session: request.ProfileID, Stage: "cleanup", Result: "stopped"})
 		return response{OK: true, Profile: &Profile{ID: request.ProfileID, Status: "stopped"}}
 	case "status":
 		session, found := server.profiles[request.ProfileID]
@@ -266,8 +315,11 @@ func (server *Server) Rebind() error {
 		return nil
 	}
 	var problems []error
-	for _, session := range server.profiles {
+	operationID := server.operationID("rebind")
+	server.setBackendOperation(operationID)
+	for id, session := range server.profiles {
 		if err := backend.Rebind(session); err != nil {
+			server.event(DiagnosticEvent{Event: "rebind", OperationID: operationID, Session: id, Stage: "physical_endpoint", Class: "rebind_failed", Code: diagnosticErrorCode(err), Result: "degraded"})
 			problems = append(problems, err)
 		}
 	}
@@ -286,6 +338,7 @@ func (server *Server) Close() error {
 	}
 	server.mu.Unlock()
 	var problems []error
+	server.setBackendOperation(server.operationID("close"))
 	for id, session := range sessions {
 		if err := server.backend.Stop(session); err != nil {
 			problems = append(problems, err)
