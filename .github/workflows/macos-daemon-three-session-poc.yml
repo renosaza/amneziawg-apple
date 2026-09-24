@@ -22,3 +22,12 @@ jobs:
           set -euo pipefail
           mkdir -p out
           sudo env AMNEZIAWG_DAEMON_RUNTIME=1 go test -C scripts/daemon-control -v -tags manualruntime -run TestManualPlannedEndpointRIBDiagnostic -count=1
+      - name: Run the TEST-NET planned route lifecycle on the disposable runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          go build -C Sources/WireGuardKitGo -o ../../out/amneziawg-go github.com/amnezia-vpn/amneziawg-go/v3
+          sudo install -d -o root -g wheel -m 0755 /usr/local/libexec
+          sudo install -o root -g wheel -m 0755 out/amneziawg-go /usr/local/libexec/amneziawg-go-daemon-three-poc
+          sudo env AMNEZIAWG_DAEMON_RUNTIME=1 AMNEZIAWG_DAEMON_BINARY=/usr/local/libexec/amneziawg-go-daemon-three-poc go test -C scripts/daemon-control -v -tags manualruntime -run TestManualRoutePlanStartAndCleanup -count=1
