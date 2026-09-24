@@ -269,15 +269,17 @@ func (backend *tunnelBackend) configureSyntheticEndpointRoute(process *tunnelPro
 }
 
 func (backend *tunnelBackend) configureSyntheticFallbackRoute(process *tunnelProcess) error {
-	if process.routeSlot != 0 {
+	if process.routeSlot < 0 || process.routeSlot >= len(syntheticSplitPrefixes) {
 		return nil
 	}
-	endpointRoute, err := configureSyntheticPrecedenceEndpointRoute(syntheticPrecedenceEndpointTarget)
-	process.precedenceEndpointRoute = endpointRoute
-	if err != nil {
-		return err
+	if process.routeSlot == 0 {
+		endpointRoute, err := configureSyntheticPrecedenceEndpointRoute(syntheticPrecedenceEndpointTarget)
+		process.precedenceEndpointRoute = endpointRoute
+		if err != nil {
+			return err
+		}
 	}
-	route, err := configureSyntheticFallbackRoute(process)
+	route, err := configureSyntheticSplitRoute(process, syntheticSplitPrefixes[process.routeSlot])
 	process.fallbackRoute = route
 	return err
 }

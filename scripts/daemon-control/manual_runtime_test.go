@@ -90,8 +90,15 @@ func TestManualSyntheticThreeTunnelLifecycle(t *testing.T) {
 			if !process.fallbackRoute.prefix.Contains(process.precedenceEndpointRoute.target) {
 				t.Fatal("physical endpoint does not shadow the synthetic fallback")
 			}
+		} else if profile.id == profileIDTwo {
+			if process.fallbackRoute == nil || process.fallbackRoute.prefix != syntheticSplitPrefixes[1] || process.precedenceEndpointRoute != nil {
+				t.Fatal("missing /32 synthetic split route owner")
+			}
+			if err := process.fallbackRoute.verify(); err != nil {
+				t.Fatal(err)
+			}
 		} else if process.fallbackRoute != nil || process.precedenceEndpointRoute != nil {
-			t.Fatal("more than one session owns the synthetic fallback")
+			t.Fatal("unexpected synthetic split route owner")
 		}
 		t.Logf("owned synthetic route target=%s interface=%s index=%d endpoint=%s physical=%s", process.route.target, process.route.name, process.route.iface.Index, process.endpointRoute.target, process.endpointRoute.iface.Name)
 	}
@@ -126,8 +133,15 @@ func TestManualSyntheticThreeTunnelLifecycle(t *testing.T) {
 		if err := process.endpointRoute.verify(); err != nil {
 			t.Fatal(err)
 		}
-		if process.fallbackRoute != nil || process.precedenceEndpointRoute != nil {
-			t.Fatal("fallback cleanup changed a surviving session")
+		if profile.id == profileIDTwo {
+			if process.fallbackRoute == nil {
+				t.Fatal("/32 split route cleanup changed a surviving session")
+			}
+			if err := process.fallbackRoute.verify(); err != nil {
+				t.Fatal(err)
+			}
+		} else if process.fallbackRoute != nil || process.precedenceEndpointRoute != nil {
+			t.Fatal("split route cleanup changed a surviving session")
 		}
 	}
 	const replacementID = "44444444-2222-4333-8444-555555555555"
