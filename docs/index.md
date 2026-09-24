@@ -15,6 +15,8 @@
 - [Decision 0010](architecture/decisions/0010-free-macos-daemon-install-poc.md): manual LaunchDaemon installation experiment.
 - [Decision 0011](architecture/decisions/0011-free-macos-daemon-profile-store.md): isolated macOS daemon-profile storage experiment.
 - [Decision 0013](architecture/decisions/0013-free-macos-stock-gui-readonly.md): unsigned stock-Manager profile-management experiment.
+- [Decision 0016](architecture/decisions/0016-real-single-split-poc-limit.md): synthetic native route-plan POC limit.
+- [Decision 0017](architecture/decisions/0017-free-macos-daemon-single-split-activation.md): unsigned Manager single-IPv4-split activation boundary.
 - [Building](BUILDING.md): local macOS build and signing prerequisites.
 - [Local development](guides/local-development.md): verified development checks.
 - [Troubleshooting](guides/troubleshooting.md): verified local toolchain limitation.

@@ -13,6 +13,7 @@ struct DaemonControlClientSelfTest {
             try testHelloProtocol()
             try testDaemonTunnelState()
             try testLifecycleProtocol()
+            try testAmbiguousStartRecoveryProtocol()
             print("daemon-control Swift client self-check passed")
         } catch {
             fputs("daemon-control Swift client self-check failed: \(error)\n", stderr)
@@ -131,10 +132,18 @@ struct DaemonControlClientSelfTest {
         let profileID = UUID(uuidString: "11111111-2222-4333-8444-555555555555")!
         let testConfiguration = "private_key=test-only\n"
         let deadline = DaemonControlProtocol.deadline(after: 1)
+        let routePlan = SyntheticRoutePlan(
+            localAddress: "192.0.2.2/32",
+            routes: [
+                .init(destination: "10.25.0.0/24", owner: "tunnel"),
+                .init(destination: "198.51.100.10/32", owner: "physicalEndpoint")
+            ]
+        )
         let start = try DaemonControlProtocol.makeRequest(
             operation: "start",
             profileID: profileID,
-            uapiConfiguration: testConfiguration
+            uapiConfiguration: testConfiguration,
+            routePlan: routePlan
         )
         try DaemonControlProtocol.writeFrame(start, to: descriptors[0], deadline: deadline, sensitive: true)
         let startRequest = try requestObject(try DaemonControlProtocol.readFrame(from: descriptors[1], deadline: deadline))
@@ -142,6 +151,11 @@ struct DaemonControlClientSelfTest {
         try expect(startRequest["operation"] as? String == "start")
         try expect(startRequest["profile_id"] as? String == profileID.uuidString.lowercased())
         try expect(startRequest["config"] as? String == testConfiguration)
+        let routePlanObject = startRequest["route_plan"] as? [String: Any]
+        try expect(routePlanObject?["local_address"] as? String == "192.0.2.2/32")
+        let routes = routePlanObject?["routes"] as? [[String: Any]]
+        try expect(routes?.count == 2)
+        try expect(String(describing: routePlanObject).contains("test-only") == false)
 
         let startResponse = Data("{\"ok\":true,\"profile\":{\"id\":\"11111111-2222-4333-8444-555555555555\",\"status\":\"running\"}}".utf8)
         try DaemonControlProtocol.writeFrame(startResponse, to: descriptors[1], deadline: deadline)
@@ -157,6 +171,7 @@ struct DaemonControlClientSelfTest {
         try expect(stopRequest["operation"] as? String == "stop")
         try expect(stopRequest["profile_id"] as? String == profileID.uuidString.lowercased())
         try expect(stopRequest["config"] == nil)
+        try expect(stopRequest["route_plan"] == nil)
 
         let stopResponse = Data("{\"ok\":true,\"profile\":{\"id\":\"11111111-2222-4333-8444-555555555555\",\"status\":\"stopped\"}}".utf8)
         try DaemonControlProtocol.writeFrame(stopResponse, to: descriptors[1], deadline: deadline)
@@ -178,6 +193,58 @@ struct DaemonControlClientSelfTest {
             throw SelfTestError.expectedFailure
         } catch let error as DaemonControlClientError {
             try expect(error == .daemonRejected)
+        }
+    }
+
+    private static func testAmbiguousStartRecoveryProtocol() throws {
+        var descriptors = [Int32](repeating: -1, count: 2)
+        guard Darwin.socketpair(AF_UNIX, SOCK_STREAM, 0, &descriptors) == 0 else {
+            throw SelfTestError.socketPairFailed
+        }
+        defer {
+            _ = Darwin.close(descriptors[0])
+            _ = Darwin.close(descriptors[1])
+        }
+
+        let profileID = UUID(uuidString: "33333333-2222-4333-8444-555555555555")!
+        let deadline = DaemonControlProtocol.deadline(after: 1)
+        let list = try DaemonControlProtocol.makeRequest(operation: "list", profileID: nil)
+        try DaemonControlProtocol.writeFrame(list, to: descriptors[0], deadline: deadline)
+        let listRequest = try requestObject(try DaemonControlProtocol.readFrame(from: descriptors[1], deadline: deadline))
+        try expect(listRequest["operation"] as? String == "list")
+        try expect(listRequest["config"] == nil && listRequest["route_plan"] == nil)
+
+        let running = Data("{\"ok\":true,\"profiles\":[{\"id\":\"33333333-2222-4333-8444-555555555555\",\"status\":\"running\"}]}".utf8)
+        try DaemonControlProtocol.writeFrame(running, to: descriptors[1], deadline: deadline)
+        let statuses = try DaemonControlProtocol.decodeListResponse(
+            DaemonControlProtocol.readFrame(from: descriptors[0], deadline: deadline)
+        )
+        try expect(statuses == [.init(id: profileID, state: .running)])
+
+        let stop = try DaemonControlProtocol.makeRequest(operation: "stop", profileID: profileID)
+        try DaemonControlProtocol.writeFrame(stop, to: descriptors[0], deadline: deadline)
+        let stopRequest = try requestObject(try DaemonControlProtocol.readFrame(from: descriptors[1], deadline: deadline))
+        try expect(stopRequest["config"] == nil && stopRequest["route_plan"] == nil)
+        let stopped = Data("{\"ok\":true,\"profile\":{\"id\":\"33333333-2222-4333-8444-555555555555\",\"status\":\"stopped\"}}".utf8)
+        try DaemonControlProtocol.writeFrame(stopped, to: descriptors[1], deadline: deadline)
+        try DaemonControlProtocol.decodeStopResponse(
+            DaemonControlProtocol.readFrame(from: descriptors[0], deadline: deadline),
+            expectedProfileID: profileID
+        )
+    }
+
+    private struct SyntheticRoutePlan: Encodable {
+        struct Route: Encodable {
+            let destination: String
+            let owner: String
+        }
+
+        let localAddress: String
+        let routes: [Route]
+
+        enum CodingKeys: String, CodingKey {
+            case localAddress = "local_address"
+            case routes
         }
     }
 

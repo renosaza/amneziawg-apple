@@ -49,9 +49,18 @@ final class DaemonControlClient {
         return try DaemonControlProtocol.decodeStatusResponse(request(operation: "status", profileID: profileID), expectedProfileID: profileID)
     }
 
-    func start(profileID: UUID, uapiConfiguration: String) throws -> DaemonControlProfileStatus {
+    func start<RoutePlan: Encodable>(
+        profileID: UUID,
+        uapiConfiguration: String,
+        routePlan: RoutePlan
+    ) throws -> DaemonControlProfileStatus {
         try verifyCompatibility()
-        let response = try request(operation: "start", profileID: profileID, uapiConfiguration: uapiConfiguration)
+        let response = try request(
+            operation: "start",
+            profileID: profileID,
+            uapiConfiguration: uapiConfiguration,
+            routePlan: routePlan
+        )
         return try DaemonControlProtocol.decodeStartResponse(response, expectedProfileID: profileID)
     }
 
@@ -66,17 +75,37 @@ final class DaemonControlClient {
     }
 
     private func request(operation: String, profileID: UUID?, uapiConfiguration: String? = nil) throws -> Data {
-        let deadline = DaemonControlProtocol.deadline(after: timeout)
-        let descriptor = try DaemonControlProtocol.connect(path: socketPath, deadline: deadline)
-        defer { _ = Darwin.close(descriptor) }
-
-        var request = try DaemonControlProtocol.makeRequest(
+        let request = try DaemonControlProtocol.makeRequest(
             operation: operation,
             profileID: profileID,
             uapiConfiguration: uapiConfiguration
         )
+        return try exchange(request, containsConfiguration: uapiConfiguration != nil)
+    }
+
+    private func request<RoutePlan: Encodable>(
+        operation: String,
+        profileID: UUID?,
+        uapiConfiguration: String,
+        routePlan: RoutePlan
+    ) throws -> Data {
+        let request = try DaemonControlProtocol.makeRequest(
+            operation: operation,
+            profileID: profileID,
+            uapiConfiguration: uapiConfiguration,
+            routePlan: routePlan
+        )
+        return try exchange(request, containsConfiguration: true)
+    }
+
+    private func exchange(_ encodedRequest: Data, containsConfiguration: Bool) throws -> Data {
+        let deadline = DaemonControlProtocol.deadline(after: timeout)
+        let descriptor = try DaemonControlProtocol.connect(path: socketPath, deadline: deadline)
+        defer { _ = Darwin.close(descriptor) }
+
+        var request = encodedRequest
         defer {
-            if uapiConfiguration != nil {
+            if containsConfiguration {
                 DaemonControlProtocol.erase(&request)
             }
         }
@@ -84,7 +113,7 @@ final class DaemonControlClient {
             request,
             to: descriptor,
             deadline: deadline,
-            sensitive: uapiConfiguration != nil
+            sensitive: containsConfiguration
         )
         return try DaemonControlProtocol.readFrame(from: descriptor, deadline: deadline)
     }
@@ -96,19 +125,23 @@ enum DaemonControlProtocol {
     static let maximumConfigurationBytes = 2 * 1024
     private static let maximumSocketPathBytes = 103
 
-    private struct Request: Encodable {
+    private struct Request<RoutePlan: Encodable>: Encodable {
         let version = DaemonControlProtocol.protocolVersion
         let operation: String
         let profileID: String?
         let config: String?
+        let routePlan: RoutePlan?
 
         enum CodingKeys: String, CodingKey {
             case version
             case operation
             case profileID = "profile_id"
             case config
+            case routePlan = "route_plan"
         }
     }
+
+    private struct NoRoutePlan: Encodable {}
 
     private struct Response: Decodable {
         let ok: Bool
@@ -147,6 +180,20 @@ enum DaemonControlProtocol {
     }
 
     static func makeRequest(operation: String, profileID: UUID?, uapiConfiguration: String? = nil) throws -> Data {
+        try makeRequest(
+            operation: operation,
+            profileID: profileID,
+            uapiConfiguration: uapiConfiguration,
+            routePlan: Optional<NoRoutePlan>.none
+        )
+    }
+
+    static func makeRequest<RoutePlan: Encodable>(
+        operation: String,
+        profileID: UUID?,
+        uapiConfiguration: String?,
+        routePlan: RoutePlan?
+    ) throws -> Data {
         if let uapiConfiguration = uapiConfiguration {
             guard !uapiConfiguration.isEmpty,
                   uapiConfiguration.utf8.count <= maximumConfigurationBytes,
@@ -156,10 +203,14 @@ enum DaemonControlProtocol {
                 throw DaemonControlClientError.invalidConfiguration
             }
         }
+        if routePlan != nil && operation != "start" {
+            throw DaemonControlClientError.invalidResponse
+        }
         let data = try JSONEncoder().encode(Request(
             operation: operation,
             profileID: profileID?.uuidString.lowercased(),
-            config: uapiConfiguration
+            config: uapiConfiguration,
+            routePlan: routePlan
         ))
         guard !data.isEmpty, data.count <= maximumFrameBytes else {
             throw DaemonControlClientError.invalidResponse

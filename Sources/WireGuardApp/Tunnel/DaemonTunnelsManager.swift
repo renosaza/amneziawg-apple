@@ -214,21 +214,203 @@ final class DaemonTunnelsManager: TunnelsManager {
     }
 
     override func startActivation(of tunnel: TunnelContainer) {
-        activationDelegate?.tunnelActivationAttemptFailed(
-            tunnel: tunnel,
-            error: .daemonModeOperationUnavailable
-        )
+        guard tunnels.contains(tunnel), tunnel.status == .inactive,
+              let profileID = tunnel.daemonProfileID,
+              let configuration = tunnel.tunnelConfiguration
+        else {
+            activationDelegate?.tunnelActivationAttemptFailed(tunnel: tunnel, error: .tunnelIsNotInactive)
+            return
+        }
+        let plan: MacOSDaemonRoutePlan
+        switch MacOSDaemonRoutePlan.buildSingleIPv4Split(
+            activating: tunnel.name,
+            configuration: configuration
+        ) {
+        case .success(let builtPlan):
+            plan = builtPlan
+        case .failure:
+            activationDelegate?.tunnelActivationAttemptFailed(
+                tunnel: tunnel,
+                error: .daemonModeUnsupportedProfile
+            )
+            return
+        }
+        guard let endpoint = configuration.peers.first?.endpoint else {
+            activationDelegate?.tunnelActivationAttemptFailed(
+                tunnel: tunnel,
+                error: .daemonModeUnsupportedProfile
+            )
+            return
+        }
+
+        let uapiConfiguration = PacketTunnelSettingsGenerator(
+            tunnelConfiguration: configuration,
+            resolvedEndpoints: [endpoint]
+        ).uapiConfiguration().0
+        tunnel.status = .activating
+        mutationQueue.async { [weak tunnel] in
+            guard let tunnel else { return }
+            let client: DaemonControlClient
+            let statuses: [DaemonControlProfileStatus]
+            do {
+                client = try DaemonControlClient(socketPath: Self.controlSocketPath)
+                statuses = try client.list()
+            } catch {
+                DispatchQueue.main.async { [weak self, weak tunnel] in
+                    guard let self, let tunnel, self.tunnels.contains(tunnel) else { return }
+                    self.markDaemonStatusesDegraded()
+                    tunnel.status = .reasserting
+                    self.activationDelegate?.tunnelActivationAttemptFailed(
+                        tunnel: tunnel,
+                        error: .daemonModeStateUncertain
+                    )
+                }
+                return
+            }
+            guard statuses.isEmpty else {
+                DispatchQueue.main.async { [weak self, weak tunnel] in
+                    guard let self, let tunnel, self.tunnels.contains(tunnel) else { return }
+                    self.applyDaemonStatuses(statuses)
+                    tunnel.status = Self.tunnelStatus(for: profileID, statuses: statuses)
+                    self.activationDelegate?.tunnelActivationAttemptFailed(
+                        tunnel: tunnel,
+                        error: .daemonModeSingleTunnelOnly
+                    )
+                }
+                return
+            }
+            do {
+                _ = try client.start(
+                    profileID: profileID,
+                    uapiConfiguration: uapiConfiguration,
+                    routePlan: plan
+                )
+                DispatchQueue.main.async { [weak self, weak tunnel] in
+                    guard let self, let tunnel, self.tunnels.contains(tunnel) else {
+                        DaemonTunnelsManager.stopOrphanedProfile(profileID)
+                        return
+                    }
+                    tunnel.status = .active
+                    self.activationDelegate?.tunnelActivationSucceeded(tunnel: tunnel)
+                }
+            } catch {
+                let startError = error
+                let reconciliation = Self.reconcileFailedStart(profileID: profileID)
+                DispatchQueue.main.async { [weak self, weak tunnel] in
+                    guard let self, let tunnel, self.tunnels.contains(tunnel) else { return }
+                    tunnel.status = reconciliation.status
+                    self.activationDelegate?.tunnelActivationAttemptFailed(
+                        tunnel: tunnel,
+                        error: reconciliation.isCertain ?
+                            .daemonModeOperationFailed(systemError: startError) :
+                            .daemonModeStateUncertain
+                    )
+                }
+            }
+        }
     }
 
     override func startDeactivation(of tunnel: TunnelContainer) {
-        activationDelegate?.tunnelActivationAttemptFailed(
-            tunnel: tunnel,
-            error: .daemonModeOperationUnavailable
-        )
+        guard tunnels.contains(tunnel),
+              let profileID = tunnel.daemonProfileID,
+              tunnel.status == .active || tunnel.status == .reasserting
+        else { return }
+        tunnel.status = .deactivating
+        mutationQueue.async { [weak self, weak tunnel] in
+            do {
+                try DaemonControlClient(socketPath: Self.controlSocketPath).stop(profileID: profileID)
+                DispatchQueue.main.async {
+                    guard let self, let tunnel, self.tunnels.contains(tunnel) else { return }
+                    tunnel.status = .inactive
+                }
+            } catch {
+                let stopError = error
+                let refreshedStatus: TunnelStatus
+                do {
+                    let statuses = try DaemonControlClient(socketPath: Self.controlSocketPath).list()
+                    refreshedStatus = Self.tunnelStatus(for: profileID, statuses: statuses)
+                } catch {
+                    refreshedStatus = .reasserting
+                }
+                DispatchQueue.main.async {
+                    guard let self, let tunnel, self.tunnels.contains(tunnel) else { return }
+                    tunnel.status = refreshedStatus
+                    self.activationDelegate?.tunnelActivationAttemptFailed(
+                        tunnel: tunnel,
+                        error: .daemonModeOperationFailed(systemError: stopError)
+                    )
+                }
+            }
+        }
     }
 
     override func refreshStatuses() {
-        // Statuses belong to the launch snapshot until lifecycle support exists.
+        mutationQueue.async { [weak self] in
+            let result = Result { try DaemonControlClient(socketPath: Self.controlSocketPath).list() }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .success(let statuses):
+                    self.applyDaemonStatuses(statuses)
+                case .failure:
+                    self.markDaemonStatusesDegraded()
+                }
+            }
+        }
+    }
+
+    private func applyDaemonStatuses(_ statuses: [DaemonControlProfileStatus]) {
+        for tunnel in tunnels where tunnel.status != .activating && tunnel.status != .deactivating {
+            guard let profileID = tunnel.daemonProfileID else { continue }
+            tunnel.status = Self.tunnelStatus(for: profileID, statuses: statuses)
+        }
+    }
+
+    private func markDaemonStatusesDegraded() {
+        for tunnel in tunnels where tunnel.status == .active {
+            tunnel.status = .reasserting
+        }
+    }
+
+    private static func reconcileFailedStart(profileID: UUID) -> (status: TunnelStatus, isCertain: Bool) {
+        do {
+            let client = try DaemonControlClient(socketPath: controlSocketPath)
+            let statuses = try client.list()
+            guard let status = statuses.first(where: { $0.id == profileID }) else {
+                return (.reasserting, false)
+            }
+            guard status.state == .running else {
+                return (.reasserting, false)
+            }
+            try client.stop(profileID: profileID)
+            let remaining = try client.list()
+            return remaining.contains(where: { $0.id == profileID }) ? (.reasserting, false) : (.inactive, true)
+        } catch {
+            return (.reasserting, false)
+        }
+    }
+
+    private static func stopOrphanedProfile(_ profileID: UUID) {
+        DispatchQueue.global(qos: .utility).async {
+            for _ in 0 ..< 2 {
+                if orphanedProfileStopIsConfirmed(profileID) { return }
+            }
+            wg_log(.error, message: "Daemon cleanup could not be confirmed for profile \(profileID.uuidString.lowercased())")
+        }
+    }
+
+    private static func orphanedProfileStopIsConfirmed(_ profileID: UUID) -> Bool {
+        do {
+            let client = try DaemonControlClient(socketPath: controlSocketPath)
+            do {
+                try client.stop(profileID: profileID)
+            } catch {
+                // A lost stop response can still mean the daemon stopped the profile.
+            }
+            return try !client.list().contains(where: { $0.id == profileID })
+        } catch {
+            return false
+        }
     }
 
     private func addMultiple(
