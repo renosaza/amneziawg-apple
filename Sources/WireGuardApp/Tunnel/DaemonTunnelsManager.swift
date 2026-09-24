@@ -354,7 +354,7 @@ final class DaemonTunnelsManager: TunnelsManager {
             do {
                 try DaemonControlClient(socketPath: Self.controlSocketPath).stop(profileID: profileID)
                 self.uncertainDaemonProfileIDs.remove(profileID)
-                DispatchQueue.main.async {
+                DispatchQueue.main.async { [weak self, weak tunnel] in
                     guard let self, let tunnel, self.tunnels.contains(tunnel) else { return }
                     tunnel.status = .inactive
                 }
@@ -373,7 +373,7 @@ final class DaemonTunnelsManager: TunnelsManager {
                     self.uncertainDaemonProfileIDs.insert(profileID)
                     refreshedStatus = .reasserting
                 }
-                DispatchQueue.main.async {
+                DispatchQueue.main.async { [weak self, weak tunnel] in
                     guard let self, let tunnel, self.tunnels.contains(tunnel) else { return }
                     tunnel.status = refreshedStatus
                     self.activationDelegate?.tunnelActivationAttemptFailed(
