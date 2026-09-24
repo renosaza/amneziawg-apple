@@ -18,7 +18,7 @@ var syntheticFallbackMask = [4]byte{255, 255, 255, 0}
 
 var syntheticSplitPrefixes = []netip.Prefix{
 	syntheticPrecedencePrefix,
-	netip.MustParsePrefix("198.51.100.11/32"),
+	netip.MustParsePrefix("192.0.2.200/32"),
 }
 
 // SyntheticFallbackRoute owns one fixed TEST-NET split prefix for the manual POC.
@@ -37,7 +37,7 @@ func configureSyntheticSplitRoute(process *tunnelProcess, prefix netip.Prefix) (
 	if process == nil || os.Geteuid() != 0 || !utunName.MatchString(process.name) {
 		return nil, errors.New("synthetic fallback route requires root and a utun")
 	}
-	if !prefix.Addr().Is4() || prefix != prefix.Masked() || !syntheticPrecedencePrefix.Contains(prefix.Addr()) || (prefix.Bits() != 24 && prefix.Bits() != 32) {
+	if !prefix.Addr().Is4() || prefix != prefix.Masked() || (prefix.Bits() != 24 && prefix.Bits() != 32) || !(syntheticPrecedencePrefix.Contains(prefix.Addr()) || syntheticIPv4Prefix.Contains(prefix.Addr())) {
 		return nil, errors.New("synthetic split route must be a canonical TEST-NET /24 or /32")
 	}
 	iface, err := net.InterfaceByName(process.name)
