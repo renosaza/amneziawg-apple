@@ -411,15 +411,17 @@ func (configured *IPv4Route) proveAbsentAfterTunnelExit() error {
 	if state := int(C.address_ownership(cName, cLocal)); state != addressStateAbsent {
 		return requireAddressState("verify vanished synthetic IPv4 address", state, addressStateAbsent)
 	}
-	message, err := configured.requestTargetLookup()
-	if err != nil {
-		return err
-	}
-	if message.Err != nil {
-		return message.Err
-	}
-	if configured.isTargetHostRoute(message) {
-		return errors.New("synthetic route remains after backend exit")
+	if configured.routeEnabled {
+		message, err := configured.requestTargetLookup()
+		if err != nil {
+			return err
+		}
+		if message.Err != nil {
+			return message.Err
+		}
+		if configured.isTargetHostRoute(message) {
+			return errors.New("synthetic route remains after backend exit")
+		}
 	}
 	configured.routeSet = false
 	configured.addressSet = false
