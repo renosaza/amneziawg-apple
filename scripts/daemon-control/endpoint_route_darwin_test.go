@@ -217,6 +217,62 @@ func TestSelectPlannedEndpointBaseRoute(t *testing.T) {
 	}
 }
 
+func TestSelectPhysicalBaseRouteIgnoresUnrelatedUtun(t *testing.T) {
+	target := netip.MustParseAddr("203.0.113.18")
+	physical := physicalRouteMessage(7, syscall.RTF_UP|syscall.RTF_GATEWAY, [4]byte{}, [4]byte{192, 0, 2, 1}, "en0")
+	physical.Addrs[syscall.RTAX_NETMASK] = &route.Inet4Addr{IP: [4]byte{0, 0, 0, 0}}
+	unrelated := physicalRouteMessage(9, syscall.RTF_UP|syscall.RTF_GATEWAY, [4]byte{203, 0, 113, 0}, [4]byte{10, 0, 0, 1}, "utun9")
+	unrelated.Addrs[syscall.RTAX_NETMASK] = &route.Inet4Addr{IP: [4]byte{255, 255, 255, 0}}
+	lookup := func(index int) (*net.Interface, error) {
+		switch index {
+		case 7:
+			return &net.Interface{Index: 7, Name: "en0"}, nil
+		case 9:
+			return &net.Interface{Index: 9, Name: "utun9"}, nil
+		default:
+			return nil, net.ErrClosed
+		}
+	}
+	selected, err := selectPhysicalBaseRouteWithInterfaceByIndex([]route.Message{unrelated, physical}, target, lookup)
+	if err != nil || selected.prefix != netip.MustParsePrefix("0.0.0.0/0") || selected.gateway != netip.MustParseAddr("192.0.2.1") || selected.iface.Name != "en0" {
+		t.Fatalf("selected=%#v err=%v", selected, err)
+	}
+}
+
+func TestSelectPhysicalBaseRouteFailsClosed(t *testing.T) {
+	target := netip.MustParseAddr("203.0.113.18")
+	lookup := func(index int) (*net.Interface, error) {
+		if index == 7 {
+			return &net.Interface{Index: 7, Name: "en0"}, nil
+		}
+		return nil, net.ErrClosed
+	}
+	physical := func(destination, mask [4]byte) *route.RouteMessage {
+		message := physicalRouteMessage(7, syscall.RTF_UP|syscall.RTF_GATEWAY, destination, [4]byte{192, 0, 2, 1}, "en0")
+		message.Addrs[syscall.RTAX_NETMASK] = &route.Inet4Addr{IP: mask}
+		return message
+	}
+	defaultRoute := physical([4]byte{}, [4]byte{})
+	hostRoute := physical(target.As4(), [4]byte{255, 255, 255, 255})
+	if _, err := selectPhysicalBaseRouteWithInterfaceByIndex([]route.Message{defaultRoute, hostRoute}, target, lookup); err == nil {
+		t.Fatal("accepted a foreign endpoint host route")
+	}
+	duplicate := physical([4]byte{}, [4]byte{})
+	if _, err := selectPhysicalBaseRouteWithInterfaceByIndex([]route.Message{defaultRoute, duplicate}, target, lookup); err == nil {
+		t.Fatal("accepted ambiguous equal physical routes")
+	}
+	incomplete := physical([4]byte{}, [4]byte{})
+	incomplete.Addrs[syscall.RTAX_GATEWAY] = nil
+	if _, err := selectPhysicalBaseRouteWithInterfaceByIndex([]route.Message{incomplete}, target, lookup); err == nil {
+		t.Fatal("accepted an incomplete physical route")
+	}
+	incompletePrefix := physical([4]byte{203, 0, 113, 0}, [4]byte{255, 255, 255, 0})
+	incompletePrefix.Addrs[syscall.RTAX_GATEWAY] = nil
+	if _, err := selectPhysicalBaseRouteWithInterfaceByIndex([]route.Message{defaultRoute, incompletePrefix}, target, lookup); err == nil {
+		t.Fatal("used a less-specific physical route after an incomplete physical candidate")
+	}
+}
+
 func TestSyntheticPhysicalEndpointRejectsChangedGateway(t *testing.T) {
 	configured := &PhysicalEndpointRoute{
 		gateway: netip.MustParseAddr("192.168.1.1"),
