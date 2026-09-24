@@ -66,6 +66,33 @@ install -m 0755 "$working/amneziawg-daemon-control-poc" "$package_root/Daemon/am
 install -m 0755 "$working/amneziawg-go-daemon-control-poc" "$package_root/Daemon/amneziawg-go-daemon-control-poc"
 install -m 0755 "$root/scripts/install-daemon-control-poc.sh" "$package_root/Daemon/install-daemon-control-poc.sh"
 
+cat > "$package_root/INSTALL.md" <<EOF_INSTALL
+# Experimental unsigned AmneziaWG package
+
+This package contains an ad-hoc-signed GUI and the matching root-controlled
+daemon-control POC from commit \`$commit\`. It is not a signed NetworkExtension
+client and is not a general release.
+
+1. Verify the archive source and inspect \`MANIFEST.json\` before opening it.
+2. Move \`AmneziaWG.app\` to Applications. macOS will require the usual
+   Gatekeeper approval for an ad-hoc signature: Control-click the app, choose
+   Open, then approve it in Privacy & Security if requested.
+3. In Terminal from this extracted directory, install the matching daemon:
+
+   \`sudo ./Daemon/install-daemon-control-poc.sh install --daemon "\$PWD/Daemon/amneziawg-daemon-control-poc" --amneziawg-go "\$PWD/Daemon/amneziawg-go-daemon-control-poc" --uid "\$(id -u)" --allow-route-plan-runtime\`
+
+The installer is intentionally root-owned, explicit, and update-free. It
+refuses replacement while sessions exist. To roll it back after stopping every
+profile, run:
+
+\`sudo ./Daemon/install-daemon-control-poc.sh uninstall --uid "\$(id -u)"\`
+
+The current experimental GUI accepts only constrained IPv4 split profiles. It
+does not support full/default routes, IPv6, DNS, ExcludeIPs, hostnames,
+on-demand, or automatic updates. Never put VPN configurations or keys in issue
+reports, CI logs, or this package directory.
+EOF_INSTALL
+
 if find "$package_root" -type l -print -quit | grep -q .; then
     fail 'package payload contains a symbolic link'
 fi
@@ -109,33 +136,6 @@ print(json.dumps({
     "kind": "experimental-unsigned-daemon-gui",
 }, indent=2, sort_keys=True))
 PY
-
-cat > "$package_root/INSTALL.md" <<EOF_INSTALL
-# Experimental unsigned AmneziaWG package
-
-This package contains an ad-hoc-signed GUI and the matching root-controlled
-daemon-control POC from commit \`$commit\`. It is not a signed NetworkExtension
-client and is not a general release.
-
-1. Verify the archive source and inspect \`MANIFEST.json\` before opening it.
-2. Move \`AmneziaWG.app\` to Applications. macOS will require the usual
-   Gatekeeper approval for an ad-hoc signature: Control-click the app, choose
-   Open, then approve it in Privacy & Security if requested.
-3. In Terminal from this extracted directory, install the matching daemon:
-
-   \`sudo ./Daemon/install-daemon-control-poc.sh install --daemon "\$PWD/Daemon/amneziawg-daemon-control-poc" --amneziawg-go "\$PWD/Daemon/amneziawg-go-daemon-control-poc" --uid "\$(id -u)" --allow-route-plan-runtime\`
-
-The installer is intentionally root-owned, explicit, and update-free. It
-refuses replacement while sessions exist. To roll it back after stopping every
-profile, run:
-
-\`sudo ./Daemon/install-daemon-control-poc.sh uninstall --uid "\$(id -u)"\`
-
-The current experimental GUI accepts only constrained IPv4 split profiles. It
-does not support full/default routes, IPv6, DNS, ExcludeIPs, hostnames,
-on-demand, or automatic updates. Never put VPN configurations or keys in issue
-reports, CI logs, or this package directory.
-EOF_INSTALL
 
 ditto -c -k --sequesterRsrc --keepParent "$package_root" "$output/$archive_name"
 printf '%s\n' "$output/$archive_name"
