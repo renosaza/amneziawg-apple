@@ -59,9 +59,16 @@ for key, path in zip(("app_executable", "daemon_control", "amneziawg_go", "insta
         assert manifest["sha256"][key] == digest.hexdigest()
 
 root = Path(sys.argv[1]).parent
+sparkle_framework = root / "AmneziaWG.app/Contents/Frameworks/Sparkle.framework"
+sparkle_root = sparkle_framework.resolve(strict=True)
 payload_sha256 = {}
 for path in sorted(root.rglob("*")):
-    assert not path.is_symlink(), f"package contains a symbolic link: {path.relative_to(root)}"
+    if path.is_symlink():
+        try:
+            path.resolve(strict=True).relative_to(sparkle_root)
+        except (FileNotFoundError, ValueError):
+            raise AssertionError(f"package contains an unexpected symbolic link: {path.relative_to(root)}")
+        continue
     assert path.is_dir() or path.is_file(), f"package contains an unexpected path: {path.relative_to(root)}"
     if path.is_file() and path.relative_to(root) != Path("MANIFEST.json"):
         digest = hashlib.sha256()
