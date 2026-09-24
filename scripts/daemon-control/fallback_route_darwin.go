@@ -6,6 +6,7 @@ package daemoncontrol
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"os"
@@ -16,7 +17,12 @@ import (
 
 var syntheticFallbackMask = [4]byte{255, 255, 255, 0}
 
-// SyntheticFallbackRoute owns the narrow fallback prefix for the precedence POC.
+var syntheticSplitPrefixes = []netip.Prefix{
+	syntheticPrecedencePrefix,
+	netip.MustParsePrefix("198.51.100.11/32"),
+}
+
+// SyntheticFallbackRoute owns one synthetic split prefix for the manual diagnostic.
 type SyntheticFallbackRoute struct {
 	name     string
 	prefix   netip.Prefix
@@ -25,29 +31,43 @@ type SyntheticFallbackRoute struct {
 }
 
 func configureSyntheticFallbackRoute(process *tunnelProcess) (*SyntheticFallbackRoute, error) {
+	return configureSyntheticSplitRoute(process, syntheticPrecedencePrefix)
+}
+
+func configureSyntheticSplitRoute(process *tunnelProcess, prefix netip.Prefix) (*SyntheticFallbackRoute, error) {
 	if process == nil || os.Geteuid() != 0 || !utunName.MatchString(process.name) {
 		return nil, errors.New("synthetic fallback route requires root and a utun")
 	}
+	if !prefix.Addr().Is4() || prefix != prefix.Masked() || !syntheticPrecedencePrefix.Contains(prefix.Addr()) || (prefix.Bits() != 24 && prefix.Bits() != 32) {
+		return nil, errors.New("split-preflight-invalid-prefix")
+	}
 	iface, err := net.InterfaceByName(process.name)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("split-preflight-interface: %w", err)
 	}
-	configured := &SyntheticFallbackRoute{name: process.name, prefix: syntheticPrecedencePrefix, iface: iface}
+	configured := &SyntheticFallbackRoute{name: process.name, prefix: prefix, iface: iface}
 	existing, err := configured.lookup()
-	if err != nil || existing.Err != nil {
-		return nil, errors.Join(err, existing.Err)
+	if err != nil {
+		return nil, fmt.Errorf("split-preflight-lookup: %w", err)
+	}
+	if existing.Err != nil {
+		return nil, fmt.Errorf("split-preflight-lookup-errno: %w", existing.Err)
 	}
 	if configured.isFallbackRoute(existing) {
-		return nil, errors.New("refusing to replace an existing fallback route")
+		return nil, errors.New("split-preflight-existing-route")
 	}
 	if configured.isMoreSpecificRoute(existing) {
-		return nil, errors.New("refusing a fallback route shadowed by a more-specific route")
+		return nil, errors.New("split-preflight-shadow")
 	}
 	if err := configured.add(); err != nil {
-		return configured.cleanupFailedRouteAdd(err)
+		return configured.cleanupFailedRouteAdd(fmt.Errorf("split-rtm-add: %w", err))
 	}
 	if err := configured.verify(); err != nil {
-		return configured.cleanupFailedRouteAdd(err)
+		ownedInRIB, ribErr := configured.ownsRouteInRIB()
+		if ribErr != nil {
+			return configured.cleanupFailedRouteAdd(fmt.Errorf("split-postadd-rib: %w", ribErr))
+		}
+		return configured.cleanupFailedRouteAdd(fmt.Errorf("split-postadd-verify rib_owned=%t: %w", ownedInRIB, err))
 	}
 	return configured, nil
 }
@@ -121,7 +141,11 @@ func (configured *SyntheticFallbackRoute) proveAbsentAfterTunnelExit() error {
 }
 
 func (configured *SyntheticFallbackRoute) write(kind int) error {
-	message, err := requestRouteMessage(kind, syscall.RTF_UP|syscall.RTF_STATIC, configured.routeAddrs())
+	flags := syscall.RTF_UP | syscall.RTF_STATIC
+	if configured.prefix.Bits() == 32 {
+		flags |= syscall.RTF_HOST
+	}
+	message, err := requestRouteMessage(kind, flags, configured.routeAddrs())
 	if err != nil {
 		configured.recordRouteWrite(kind, err)
 		return err
@@ -153,6 +177,9 @@ func (configured *SyntheticFallbackRoute) lookup() (*route.RouteMessage, error) 
 }
 
 func (configured *SyntheticFallbackRoute) probe() netip.Addr {
+	if configured.prefix.Bits() == 32 {
+		return configured.prefix.Addr()
+	}
 	return configured.prefix.Addr().Next()
 }
 
@@ -160,7 +187,7 @@ func (configured *SyntheticFallbackRoute) routeAddrs() []route.Addr {
 	addrs := make([]route.Addr, syscall.RTAX_IFP+1)
 	addrs[syscall.RTAX_DST] = &route.Inet4Addr{IP: configured.prefix.Addr().As4()}
 	addrs[syscall.RTAX_GATEWAY] = &route.LinkAddr{Index: configured.iface.Index, Name: configured.name}
-	addrs[syscall.RTAX_NETMASK] = &route.Inet4Addr{IP: syntheticFallbackMask}
+	addrs[syscall.RTAX_NETMASK] = &route.Inet4Addr{IP: prefixMask(configured.prefix)}
 	addrs[syscall.RTAX_IFP] = &route.LinkAddr{Index: configured.iface.Index, Name: configured.name}
 	return addrs
 }
@@ -176,7 +203,29 @@ func (configured *SyntheticFallbackRoute) ownsRoute(message *route.RouteMessage)
 
 func (configured *SyntheticFallbackRoute) isFallbackRoute(message *route.RouteMessage) bool {
 	prefix, ok := routePrefix(message)
-	return ok && message.Flags&syscall.RTF_UP != 0 && message.Flags&syscall.RTF_HOST == 0 && prefix == configured.prefix
+	if !ok || message.Flags&syscall.RTF_UP == 0 || prefix != configured.prefix {
+		return false
+	}
+	if configured.prefix.Bits() == 32 {
+		return message.Flags&syscall.RTF_HOST != 0
+	}
+	return message.Flags&syscall.RTF_HOST == 0
+}
+
+func prefixMask(prefix netip.Prefix) [4]byte {
+	mask := net.CIDRMask(prefix.Bits(), 32)
+	return [4]byte{mask[0], mask[1], mask[2], mask[3]}
+}
+
+func splitRouteDiagnostic(err error) string {
+	if err == nil {
+		return ""
+	}
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		return fmt.Sprintf("%s errno=%d", err, errno)
+	}
+	return err.Error()
 }
 
 func (configured *SyntheticFallbackRoute) isMoreSpecificRoute(message *route.RouteMessage) bool {

@@ -90,8 +90,15 @@ func TestManualSyntheticThreeTunnelLifecycle(t *testing.T) {
 			if !process.fallbackRoute.prefix.Contains(process.precedenceEndpointRoute.target) {
 				t.Fatal("physical endpoint does not shadow the synthetic fallback")
 			}
+		} else if profile.id == profileIDTwo {
+			if process.fallbackRoute == nil || process.fallbackRoute.prefix != syntheticSplitPrefixes[1] || process.precedenceEndpointRoute != nil {
+				t.Fatal("missing /32 synthetic split route owner")
+			}
+			if err := process.fallbackRoute.verify(); err != nil {
+				t.Fatal(err)
+			}
 		} else if process.fallbackRoute != nil || process.precedenceEndpointRoute != nil {
-			t.Fatal("more than one session owns the synthetic fallback")
+			t.Fatal("unexpected synthetic split route owner")
 		}
 		t.Logf("owned synthetic route target=%s interface=%s index=%d endpoint=%s physical=%s", process.route.target, process.route.name, process.route.iface.Index, process.endpointRoute.target, process.endpointRoute.iface.Name)
 	}
@@ -100,6 +107,8 @@ func TestManualSyntheticThreeTunnelLifecycle(t *testing.T) {
 	middleEndpointRoute := middle.endpointRoute
 	middleFallbackRoute := middle.fallbackRoute
 	middlePrecedenceEndpointRoute := middle.precedenceEndpointRoute
+	overlap := server.profiles[profileIDTwo].value.(*tunnelProcess).fallbackRoute
+	t.Logf("overlap diagnostic fallback=%s owner=%s index=%d specific=%s owner=%s index=%d", middleFallbackRoute.prefix, middleFallbackRoute.name, middleFallbackRoute.iface.Index, overlap.prefix, overlap.name, overlap.iface.Index)
 	if stopped := server.apply(request{Operation: "stop", ProfileID: profileID}); !stopped.OK {
 		t.Fatalf("stop fallback-owning tunnel failed: %#v", stopped)
 	}
@@ -126,13 +135,20 @@ func TestManualSyntheticThreeTunnelLifecycle(t *testing.T) {
 		if err := process.endpointRoute.verify(); err != nil {
 			t.Fatal(err)
 		}
-		if process.fallbackRoute != nil || process.precedenceEndpointRoute != nil {
-			t.Fatal("fallback cleanup changed a surviving session")
+		if profile.id == profileIDTwo {
+			if process.fallbackRoute == nil {
+				t.Fatal("/32 split route cleanup changed a surviving session")
+			}
+			if err := process.fallbackRoute.verify(); err != nil {
+				t.Fatal(err)
+			}
+		} else if process.fallbackRoute != nil || process.precedenceEndpointRoute != nil {
+			t.Fatal("split route cleanup changed a surviving session")
 		}
 	}
 	const replacementID = "44444444-2222-4333-8444-555555555555"
 	if started := server.apply(request{Operation: "start", ProfileID: replacementID, Config: "private_key=0404040404040404040404040404040404040404040404040404040404040404"}); !started.OK {
-		t.Fatalf("replacement start failed: %#v", started)
+		t.Fatalf("overlap restart failure stage=%s diagnostic=%s response=%#v", backend.(*tunnelBackend).lastStartStage, backend.(*tunnelBackend).lastStartDiagnostic, started)
 	}
 	replacement := server.profiles[replacementID].value.(*tunnelProcess)
 	if replacement.route == nil || replacement.endpointRoute == nil || replacement.fallbackRoute == nil || replacement.precedenceEndpointRoute == nil || replacement.route.target != middleRoute.target || replacement.endpointRoute.target != middleEndpointRoute.target || replacement.precedenceEndpointRoute.target != middlePrecedenceEndpointRoute.target {

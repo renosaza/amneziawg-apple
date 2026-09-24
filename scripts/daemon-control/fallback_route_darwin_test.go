@@ -5,8 +5,10 @@
 package daemoncontrol
 
 import (
+	"fmt"
 	"net"
 	"net/netip"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -88,6 +90,18 @@ func TestSyntheticFallbackRetainsUnknownAddOutcome(t *testing.T) {
 	configured.recordRouteWrite(syscall.RTM_ADD, syscall.EEXIST)
 	if configured.routeSet {
 		t.Fatal("retained fallback recovery state after a kernel-rejected add")
+	}
+}
+
+func TestSyntheticSplitRouteSupportsHostPrefixAndDiagnosticErrno(t *testing.T) {
+	prefix := netip.MustParsePrefix("198.51.100.11/32")
+	configured := &SyntheticFallbackRoute{prefix: prefix}
+	message := fallbackRouteMessage(7, syscall.RTF_UP|syscall.RTF_HOST|syscall.RTF_STATIC, prefix.Addr().As4(), [4]byte{255, 255, 255, 255}, "utun7")
+	if !configured.isFallbackRoute(message) || configured.probe() != prefix.Addr() || prefixMask(prefix) != [4]byte{255, 255, 255, 255} {
+		t.Fatal("host split route lost its exact ownership shape")
+	}
+	if diagnostic := splitRouteDiagnostic(fmt.Errorf("split-rtm-add: %w", syscall.EEXIST)); !strings.Contains(diagnostic, "split-rtm-add") || !strings.Contains(diagnostic, "errno=17") {
+		t.Fatalf("missing safe route errno diagnostic: %q", diagnostic)
 	}
 }
 
