@@ -38,6 +38,10 @@ func TestPhysicalEndpointDiagnosticsUseFixedStagesAndBoundedErrnos(t *testing.T)
 	if _, _, ok := physicalEndpointRouteDiagnostic(errors.New("unwrapped")); ok {
 		t.Fatal("classified an unwrapped route error")
 	}
+	stage, code, ok := physicalEndpointRouteDiagnostic(failedPhysicalEndpointRoute(physicalEndpointStageReuseHost, errPhysicalEndpointReuseRejected))
+	if !ok || stage != physicalEndpointStageReuseHost || code != "host_route_mismatch" {
+		t.Fatalf("reuse stage=%q code=%q ok=%t", stage, code, ok)
+	}
 }
 
 func TestPhysicalEndpointDiagnosticDoesNotLogErrorText(t *testing.T) {
@@ -395,6 +399,16 @@ func TestPlannedEndpointReusesOnlyMatchingPhysicalHostRoute(t *testing.T) {
 	}
 	if _, err := selectPhysicalBaseRouteWithInterfaceByIndex([]route.Message{host, base}, target, false, lookup); err == nil {
 		t.Fatal("accepted a host route without explicit reuse")
+	}
+	if _, err := selectPhysicalBaseRouteWithInterfaceByIndex([]route.Message{host, host, base}, target, true, lookup); err == nil {
+		t.Fatal("accepted competing endpoint host routes")
+	}
+	configured.reused = true
+	if err := configured.Close(); err != nil || configured.routeSet {
+		t.Fatalf("borrowed route close err=%v routeSet=%t", err, configured.routeSet)
+	}
+	if changed, err := configured.Rebind(); err == nil || changed {
+		t.Fatalf("borrowed route rebind changed=%t err=%v", changed, err)
 	}
 }
 

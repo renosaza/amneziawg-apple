@@ -148,6 +148,7 @@ func selectPhysicalBaseRoute(messages []route.Message, target netip.Addr, ignore
 
 func selectPhysicalBaseRouteWithInterfaceByIndex(messages []route.Message, target netip.Addr, ignoreTargetHost bool, interfaceByIndex func(int) (*net.Interface, error)) (physicalBaseRoute, error) {
 	var selected physicalBaseRoute
+	ignoredTargetHost := false
 	for _, parsed := range messages {
 		message, ok := parsed.(*route.RouteMessage)
 		if !ok || message.Flags&syscall.RTF_UP == 0 {
@@ -161,6 +162,10 @@ func selectPhysicalBaseRouteWithInterfaceByIndex(messages []route.Message, targe
 			return physicalBaseRoute{}, errors.New("foreign endpoint host route")
 		}
 		if prefix.Bits() == 32 {
+			if ignoredTargetHost {
+				return physicalBaseRoute{}, errors.New("ambiguous endpoint host routes")
+			}
+			ignoredTargetHost = true
 			continue
 		}
 		gateway, iface, err := physicalRIBRouteMetadata(message, interfaceByIndex)
@@ -340,7 +345,7 @@ func (configured *PhysicalEndpointRoute) add() error { return configured.write(s
 func (configured *PhysicalEndpointRoute) Rebind() (bool, error) {
 	if !configured.routeSet {
 		if configured.reused {
-			return false, errors.Join(configured.verify(), configured.baseRouteInRIBError())
+			return false, errors.New("borrowed endpoint route cannot be rebound")
 		}
 		return false, errors.New("endpoint route is not owned")
 	}
