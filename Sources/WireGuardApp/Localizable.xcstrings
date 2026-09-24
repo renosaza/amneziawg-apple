@@ -21254,6 +21254,23 @@
         }
       }
     },
+    "macToggleStatusButtonRefreshStatus" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh Status"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Обновить статус"
+          }
+        }
+      }
+    },
     "macToggleStatusButtonRestarting" : {
       "extractionState" : "manual",
       "localizations" : {

@@ -234,6 +234,8 @@ class TunnelDetailTableViewController: NSViewController {
                 tunnelsManager.startActivation(of: tunnel)
             } else if tunnel.status == .active {
                 tunnelsManager.startDeactivation(of: tunnel)
+            } else if tunnel.status == .reasserting {
+                tunnelsManager.refreshStatuses()
             }
         }
     }
@@ -453,7 +455,7 @@ extension TunnelDetailTableViewController: NSTableViewDelegate {
     func toggleStatusCell() -> NSView {
         let cell: ButtonRow = tableView.dequeueReusableCell()
         cell.buttonTitle = TunnelDetailTableViewController.localizedToggleStatusActionText(for: tunnel)
-        cell.isButtonEnabled = (tunnel.hasOnDemandRules || tunnel.status == .active || tunnel.status == .inactive)
+        cell.isButtonEnabled = (tunnel.hasOnDemandRules || tunnel.status == .active || tunnel.status == .inactive || tunnel.status == .reasserting)
         cell.buttonToolTip = tr("macToolTipToggleStatus")
         cell.onButtonClicked = { [weak self] in
             self?.handleToggleActiveStatusAction()
@@ -461,7 +463,7 @@ extension TunnelDetailTableViewController: NSTableViewDelegate {
         let changeHandler: (TunnelContainer, Any) -> Void = { [weak cell] tunnel, _ in
             guard let cell = cell else { return }
             cell.buttonTitle = TunnelDetailTableViewController.localizedToggleStatusActionText(for: tunnel)
-            cell.isButtonEnabled = (tunnel.hasOnDemandRules || tunnel.status == .active || tunnel.status == .inactive)
+            cell.isButtonEnabled = (tunnel.hasOnDemandRules || tunnel.status == .active || tunnel.status == .inactive || tunnel.status == .reasserting)
         }
         cell.statusObservationToken = tunnel.observe(\.status, changeHandler: changeHandler)
         cell.isOnDemandEnabledObservationToken = tunnel.observe(\.isActivateOnDemandEnabled, changeHandler: changeHandler)
@@ -540,7 +542,7 @@ extension TunnelDetailTableViewController: NSTableViewDelegate {
             case .deactivating:
                 return tr("macToggleStatusButtonDeactivating")
             case .reasserting:
-                return tr("macToggleStatusButtonReasserting")
+                return tr("macToggleStatusButtonRefreshStatus")
             case .restarting:
                 return tr("macToggleStatusButtonRestarting")
             }
