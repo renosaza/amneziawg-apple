@@ -66,6 +66,9 @@ func TestManualSyntheticThreeTunnelLifecycle(t *testing.T) {
 		if err := process.route.verify(); err != nil {
 			t.Fatal(err)
 		}
+		if err := process.route.requireOwnedAddress(); err != nil {
+			t.Fatal(err)
+		}
 		if err := process.endpointRoute.verify(); err != nil {
 			t.Fatal(err)
 		}
