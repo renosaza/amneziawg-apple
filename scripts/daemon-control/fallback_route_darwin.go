@@ -34,14 +34,14 @@ func configureSyntheticFallbackRoute(process *tunnelProcess) (*SyntheticFallback
 }
 
 func configureSyntheticSplitRoute(process *tunnelProcess, prefix netip.Prefix) (*SyntheticFallbackRoute, error) {
-	return configureSplitRoute(process, prefix, true)
+	return configureSplitRoute(process, prefix, true, nil)
 }
 
-func configurePlannedSplitRoute(process *tunnelProcess, prefix netip.Prefix) (*SyntheticFallbackRoute, error) {
-	return configureSplitRoute(process, prefix, false)
+func configurePlannedSplitRoute(process *tunnelProcess, prefix netip.Prefix, endpoint *PhysicalEndpointRoute) (*SyntheticFallbackRoute, error) {
+	return configureSplitRoute(process, prefix, false, endpoint)
 }
 
-func configureSplitRoute(process *tunnelProcess, prefix netip.Prefix, synthetic bool) (*SyntheticFallbackRoute, error) {
+func configureSplitRoute(process *tunnelProcess, prefix netip.Prefix, synthetic bool, endpoint *PhysicalEndpointRoute) (*SyntheticFallbackRoute, error) {
 	if process == nil || os.Geteuid() != 0 || !utunName.MatchString(process.name) {
 		return nil, errors.New("synthetic fallback route requires root and a utun")
 	}
@@ -53,7 +53,7 @@ func configureSplitRoute(process *tunnelProcess, prefix netip.Prefix, synthetic 
 		return nil, err
 	}
 	configured := &SyntheticFallbackRoute{name: process.name, prefix: prefix, iface: iface}
-	if !synthetic && configured.hasForeignMoreSpecificRoute() {
+	if !synthetic && configured.hasForeignMoreSpecificRoute(endpoint) {
 		return nil, errors.New("refusing a split route shadowed in the RIB")
 	}
 	existing, err := configured.lookup()
@@ -75,7 +75,7 @@ func configureSplitRoute(process *tunnelProcess, prefix netip.Prefix, synthetic 
 	return configured, nil
 }
 
-func (configured *SyntheticFallbackRoute) hasForeignMoreSpecificRoute() bool {
+func (configured *SyntheticFallbackRoute) hasForeignMoreSpecificRoute(endpoint *PhysicalEndpointRoute) bool {
 	rib, err := route.FetchRIB(syscall.AF_INET, route.RIBTypeRoute, 0)
 	if err != nil {
 		return true
@@ -84,14 +84,14 @@ func (configured *SyntheticFallbackRoute) hasForeignMoreSpecificRoute() bool {
 	if err != nil {
 		return true
 	}
-	return hasForeignMoreSpecificRoute(messages, configured.prefix, netip.Prefix{})
+	return hasForeignMoreSpecificRoute(messages, configured.prefix, endpoint)
 }
 
-func hasForeignMoreSpecificRoute(messages []route.Message, planned, ownEndpoint netip.Prefix) bool {
+func hasForeignMoreSpecificRoute(messages []route.Message, planned netip.Prefix, endpoint *PhysicalEndpointRoute) bool {
 	for _, parsed := range messages {
 		message, ok := parsed.(*route.RouteMessage)
 		prefix, ok := routePrefix(message)
-		if ok && prefix != ownEndpoint && message.Flags&syscall.RTF_UP != 0 && planned.Contains(prefix.Addr()) && prefix.Bits() > planned.Bits() {
+		if ok && (endpoint == nil || !endpoint.ownsRoute(message)) && message.Flags&syscall.RTF_UP != 0 && planned.Contains(prefix.Addr()) && prefix.Bits() > planned.Bits() {
 			return true
 		}
 	}

@@ -16,11 +16,13 @@ import (
 func TestPlannedSplitRejectsForeignMoreSpecificRIBRoute(t *testing.T) {
 	planned := netip.MustParsePrefix("198.51.100.0/24")
 	foreign := fallbackRouteMessage(8, syscall.RTF_UP, [4]byte{198, 51, 100, 200}, [4]byte{255, 255, 255, 255}, "utun8")
-	if !hasForeignMoreSpecificRoute([]route.Message{foreign}, planned, netip.Prefix{}) {
+	if !hasForeignMoreSpecificRoute([]route.Message{foreign}, planned, nil) {
 		t.Fatal("accepted foreign shadow away from probe")
 	}
-	if hasForeignMoreSpecificRoute([]route.Message{foreign}, planned, netip.MustParsePrefix("198.51.100.200/32")) {
-		t.Fatal("rejected owned endpoint exception")
+	endpoint := &PhysicalEndpointRoute{target: netip.MustParseAddr("198.51.100.200"), gateway: netip.MustParseAddr("192.0.2.1"), iface: &net.Interface{Index: 8, Name: "utun8"}}
+	foreign.Addrs[syscall.RTAX_GATEWAY] = &route.Inet4Addr{IP: [4]byte{192, 0, 2, 2}}
+	if !hasForeignMoreSpecificRoute([]route.Message{foreign}, planned, endpoint) {
+		t.Fatal("accepted foreign route sharing endpoint prefix")
 	}
 }
 

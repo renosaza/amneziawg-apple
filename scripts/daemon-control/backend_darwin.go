@@ -175,7 +175,7 @@ func (backend *tunnelBackend) start(config string, plan *routePlan) (Session, er
 			}
 			if err == nil {
 				backend.lastStartStage = "split-route"
-				process.fallbackRoute, err = configurePlannedSplitRoute(process, prefix)
+				process.fallbackRoute, err = configurePlannedSplitRoute(process, prefix, process.precedenceEndpointRoute)
 			}
 			if err == nil {
 				err = process.precedenceEndpointRoute.verify()
