@@ -6,6 +6,10 @@ import Cocoa
 // swiftlint:disable colon
 
 class MainMenu: NSMenu {
+    #if DAEMON_MODE
+        private(set) var checkForUpdatesMenuItem: NSMenuItem?
+    #endif
+
     init() {
         super.init(title: "")
         addSubmenu(createApplicationMenu())
@@ -30,6 +34,12 @@ class MainMenu: NSMenu {
         let aboutMenuItem = menu.addItem(withTitle: tr("macMenuAbout"),
             action: #selector(AppDelegate.aboutClicked), keyEquivalent: "")
         aboutMenuItem.target = NSApp.delegate
+
+        #if DAEMON_MODE
+            if DaemonUpdater.isConfigured {
+                checkForUpdatesMenuItem = menu.addItem(withTitle: "Check for Updates…", action: nil, keyEquivalent: "")
+            }
+        #endif
 
         menu.addItem(NSMenuItem.separator())
 

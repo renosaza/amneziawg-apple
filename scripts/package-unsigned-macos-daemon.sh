@@ -60,7 +60,7 @@ mkdir -p "$package_root/Daemon"
 ditto "$app_source" "$package_root/AmneziaWG.app"
 # This is an ad-hoc signature only. It establishes no developer identity and
 # does not avoid Gatekeeper approval on another Mac.
-codesign --force --sign - --timestamp=none "$package_root/AmneziaWG.app"
+codesign --force --deep --sign - --timestamp=none "$package_root/AmneziaWG.app"
 codesign --verify --deep --strict "$package_root/AmneziaWG.app"
 install -m 0755 "$working/amneziawg-daemon-control-poc" "$package_root/Daemon/amneziawg-daemon-control-poc"
 install -m 0755 "$working/amneziawg-go-daemon-control-poc" "$package_root/Daemon/amneziawg-go-daemon-control-poc"
@@ -89,13 +89,17 @@ profile, run:
 
 The current experimental GUI accepts only constrained IPv4 split profiles. It
 does not support full/default routes, IPv6, DNS, ExcludeIPs, hostnames,
-on-demand, or automatic updates. Never put VPN configurations or keys in issue
-reports, CI logs, or this package directory.
+on-demand, or automatic updates in this CI artifact. Never put VPN
+configurations or keys in issue reports, CI logs, or this package directory.
 EOF_INSTALL
 
-if find "$package_root" -type l -print -quit | grep -q .; then
-    fail 'package payload contains a symbolic link'
-fi
+sparkle_framework="$package_root/AmneziaWG.app/Contents/Frameworks/Sparkle.framework"
+while IFS= read -r -d '' link; do
+    case "$link" in
+        "$sparkle_framework"/*) ;;
+        *) fail "package payload contains an unexpected symbolic link: $link" ;;
+    esac
+done < <(find "$package_root" -type l -print0)
 
 app_sha256=$(/usr/bin/shasum -a 256 "$package_root/AmneziaWG.app/Contents/MacOS/AmneziaWG" | /usr/bin/awk '{print $1}')
 daemon_sha256=$(/usr/bin/shasum -a 256 "$package_root/Daemon/amneziawg-daemon-control-poc" | /usr/bin/awk '{print $1}')
@@ -109,10 +113,16 @@ import os
 from pathlib import Path
 
 root = Path(os.environ["PACKAGE_ROOT"])
+sparkle_framework = root / "AmneziaWG.app/Contents/Frameworks/Sparkle.framework"
+sparkle_root = sparkle_framework.resolve(strict=True)
 payload_sha256 = {}
 for path in sorted(root.rglob("*")):
     if path.is_symlink():
-        raise SystemExit(f"package payload contains a symbolic link: {path.relative_to(root)}")
+        try:
+            path.resolve(strict=True).relative_to(sparkle_root)
+        except (FileNotFoundError, ValueError):
+            raise SystemExit(f"package payload contains an unexpected symbolic link: {path.relative_to(root)}")
+        continue
     if path.is_file() and path.relative_to(root) != Path("MANIFEST.json"):
         digest = hashlib.sha256()
         with path.open("rb") as artifact:

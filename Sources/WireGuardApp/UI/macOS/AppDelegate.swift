@@ -15,6 +15,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var manageTunnelsRootVC: ManageTunnelsRootViewController?
     var manageTunnelsWindowObject: NSWindow?
     var onAppDeactivation: (() -> Void)?
+    #if DAEMON_MODE
+        private var updater: DaemonUpdater?
+    #endif
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         // To workaround a possible AppKit bug that causes the main menu to become unresponsive sometimes
@@ -49,6 +52,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         NSApp.mainMenu = MainMenu()
+        #if DAEMON_MODE
+            if let mainMenu = NSApp.mainMenu as? MainMenu,
+               let checkForUpdatesMenuItem = mainMenu.checkForUpdatesMenuItem {
+                checkForUpdatesMenuItem.isEnabled = false
+                DispatchQueue.global(qos: .utility).async { [weak self] in
+                    guard DaemonUpdater.isCompatibleDaemon(at: DaemonTunnelsManager.controlSocketPath) else {
+                        return
+                    }
+                    DispatchQueue.main.async {
+                        guard let self, let updater = DaemonUpdater() else { return }
+                        updater.configure(checkForUpdatesMenuItem: checkForUpdatesMenuItem)
+                        self.updater = updater
+                    }
+                }
+            }
+        #endif
         setDockIconAndMainMenuVisibility(isVisible: !isLaunchedAtLogin)
 
         let managerLoaded: (Result<TunnelsManager, TunnelsManagerError>) -> Void = { [weak self] result in
