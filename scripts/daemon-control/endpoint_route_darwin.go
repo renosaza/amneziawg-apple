@@ -72,6 +72,10 @@ func (configured *PhysicalEndpointRoute) findBaseRoute(target netip.Addr) (netip
 }
 
 func selectBaseRoute(messages []route.Message, target, gateway netip.Addr, iface *net.Interface) (netip.Prefix, error) {
+	return selectBaseRouteWithInterfaceByIndex(messages, target, gateway, iface, net.InterfaceByIndex)
+}
+
+func selectBaseRouteWithInterfaceByIndex(messages []route.Message, target, gateway netip.Addr, iface *net.Interface, interfaceByIndex func(int) (*net.Interface, error)) (netip.Prefix, error) {
 	var selected netip.Prefix
 	for _, parsed := range messages {
 		message, ok := parsed.(*route.RouteMessage)
@@ -82,8 +86,7 @@ func selectBaseRoute(messages []route.Message, target, gateway netip.Addr, iface
 		if !ok || !prefix.Contains(target) {
 			continue
 		}
-		actualGateway, index, name, err := physicalRouteMetadata(message)
-		if err != nil || actualGateway != gateway || index != iface.Index || name != iface.Name {
+		if !matchesRIBPhysicalRoute(message, gateway, iface, interfaceByIndex) {
 			continue
 		}
 		if selected.IsValid() && selected.Bits() == prefix.Bits() {
@@ -296,10 +299,33 @@ func (configured *PhysicalEndpointRoute) baseRouteInRIB() bool {
 }
 
 func (configured *PhysicalEndpointRoute) matchesBaseRoute(message *route.RouteMessage) bool {
+	return configured.matchesBaseRouteWithInterfaceByIndex(message, net.InterfaceByIndex)
+}
+
+func (configured *PhysicalEndpointRoute) matchesBaseRouteWithInterfaceByIndex(message *route.RouteMessage, interfaceByIndex func(int) (*net.Interface, error)) bool {
 	prefix, ok := routePrefix(message)
-	gateway, gatewayOK := routeAddress(message, syscall.RTAX_GATEWAY).(*route.Inet4Addr)
-	interfaceAddress, interfaceOK := routeAddress(message, syscall.RTAX_IFP).(*route.LinkAddr)
-	return ok && gatewayOK && interfaceOK && message.Flags&(syscall.RTF_UP|syscall.RTF_GATEWAY) == syscall.RTF_UP|syscall.RTF_GATEWAY && !utunName.MatchString(interfaceAddress.Name) && interfaceAddress.Index == configured.iface.Index && interfaceAddress.Name == configured.iface.Name && prefix == configured.basePrefix && message.Index == configured.iface.Index && gateway.IP == configured.gateway.As4()
+	return ok && prefix == configured.basePrefix && matchesRIBPhysicalRoute(message, configured.gateway, configured.iface, interfaceByIndex)
+}
+
+// matchesRIBPhysicalRoute accepts complete RIB metadata, or Darwin's observed
+// nil RTAX_IFP form only after resolving the recorded physical interface again.
+func matchesRIBPhysicalRoute(message *route.RouteMessage, gateway netip.Addr, iface *net.Interface, interfaceByIndex func(int) (*net.Interface, error)) bool {
+	if message == nil {
+		return false
+	}
+	if routeAddress(message, syscall.RTAX_IFP) != nil {
+		actualGateway, index, name, err := physicalRouteMetadata(message)
+		return err == nil && actualGateway == gateway && iface != nil && index == iface.Index && name == iface.Name
+	}
+	if iface == nil || interfaceByIndex == nil || message.Index <= 0 || message.Index != iface.Index || message.Flags&(syscall.RTF_UP|syscall.RTF_GATEWAY) != syscall.RTF_UP|syscall.RTF_GATEWAY {
+		return false
+	}
+	actualGateway, gatewayOK := routeAddress(message, syscall.RTAX_GATEWAY).(*route.Inet4Addr)
+	if !gatewayOK || netip.AddrFrom4(actualGateway.IP) != gateway {
+		return false
+	}
+	actualInterface, err := interfaceByIndex(message.Index)
+	return err == nil && actualInterface != nil && actualInterface.Index == iface.Index && actualInterface.Name == iface.Name && actualInterface.Flags&net.FlagLoopback == 0 && !utunName.MatchString(actualInterface.Name)
 }
 
 func (configured *PhysicalEndpointRoute) routeAddrs() []route.Addr {

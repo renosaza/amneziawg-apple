@@ -126,6 +126,62 @@ func TestPlannedEndpointBaseRouteIdentity(t *testing.T) {
 	}
 }
 
+func TestPlannedEndpointRIBBaseRouteWithoutIFP(t *testing.T) {
+	target, gateway := netip.MustParseAddr("192.0.2.9"), netip.MustParseAddr("192.0.2.1")
+	iface := &net.Interface{Index: 7, Name: "en0"}
+	lookup := func(index int) (*net.Interface, error) {
+		if index != iface.Index {
+			t.Fatalf("lookup index = %d", index)
+		}
+		return iface, nil
+	}
+	base := physicalRouteMessage(7, syscall.RTF_UP|syscall.RTF_GATEWAY, [4]byte{}, gateway.As4(), "en0")
+	base.Addrs[syscall.RTAX_NETMASK] = &route.Inet4Addr{IP: [4]byte{0, 0, 0, 0}}
+	base.Addrs[syscall.RTAX_IFP] = nil
+	lan := physicalRouteMessage(7, syscall.RTF_UP|syscall.RTF_GATEWAY, [4]byte{192, 0, 2, 0}, gateway.As4(), "en0")
+	lan.Addrs[syscall.RTAX_NETMASK] = &route.Inet4Addr{IP: [4]byte{255, 255, 255, 0}}
+	lan.Addrs[syscall.RTAX_IFP] = nil
+	selected, err := selectBaseRouteWithInterfaceByIndex([]route.Message{base, lan}, target, gateway, iface, lookup)
+	if err != nil || selected != netip.MustParsePrefix("192.0.2.0/24") {
+		t.Fatalf("selected=%v err=%v", selected, err)
+	}
+
+	for _, mutate := range []func(*route.RouteMessage){
+		func(message *route.RouteMessage) { message.Index = 0 },
+		func(message *route.RouteMessage) { message.Index = 8 },
+		func(message *route.RouteMessage) {
+			message.Addrs[syscall.RTAX_GATEWAY] = &route.Inet4Addr{IP: [4]byte{192, 0, 2, 2}}
+		},
+		func(message *route.RouteMessage) { message.Flags &^= syscall.RTF_GATEWAY },
+	} {
+		candidate := *lan
+		candidate.Addrs = append([]route.Addr(nil), lan.Addrs...)
+		mutate(&candidate)
+		if matchesRIBPhysicalRoute(&candidate, gateway, iface, lookup) {
+			t.Fatal("accepted incomplete RIB base route")
+		}
+	}
+	if matchesRIBPhysicalRoute(lan, gateway, iface, func(int) (*net.Interface, error) {
+		return &net.Interface{Index: 7, Name: "utun7"}, nil
+	}) {
+		t.Fatal("accepted a utun RIB fallback")
+	}
+	if matchesRIBPhysicalRoute(lan, gateway, iface, func(int) (*net.Interface, error) {
+		return &net.Interface{Index: 7, Name: "en0", Flags: net.FlagLoopback}, nil
+	}) {
+		t.Fatal("accepted a loopback RIB fallback")
+	}
+	if matchesRIBPhysicalRoute(lan, gateway, iface, func(int) (*net.Interface, error) {
+		return &net.Interface{Index: 7, Name: "en1"}, nil
+	}) {
+		t.Fatal("accepted a renamed RIB interface")
+	}
+	configured := &PhysicalEndpointRoute{basePrefix: netip.MustParsePrefix("192.0.2.0/24"), gateway: gateway, iface: iface}
+	if !configured.matchesBaseRouteWithInterfaceByIndex(lan, lookup) {
+		t.Fatal("post-add base identity rejected the accepted RIB fallback")
+	}
+}
+
 func TestSelectPlannedEndpointBaseRoute(t *testing.T) {
 	target, gateway := netip.MustParseAddr("192.0.2.9"), netip.MustParseAddr("192.0.2.1")
 	iface := &net.Interface{Index: 7, Name: "en0"}
