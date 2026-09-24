@@ -121,6 +121,10 @@ final class DaemonTunnelsManager: TunnelsManager {
             completionHandler(.daemonModeOperationUnavailable)
             return
         }
+        guard tunnel.status == .inactive else {
+            completionHandler(.daemonModeOperationUnavailable)
+            return
+        }
         guard tunnels.contains(tunnel), let profileID = tunnel.daemonProfileID else {
             completionHandler(.systemErrorOnModifyTunnel(systemError: DaemonProfileStoreError.profileNotFound))
             return
@@ -360,7 +364,13 @@ final class DaemonTunnelsManager: TunnelsManager {
                 do {
                     let statuses = try DaemonControlClient(socketPath: Self.controlSocketPath).list()
                     refreshedStatus = Self.tunnelStatus(for: profileID, statuses: statuses)
+                    if DaemonTunnelState.isAuthoritativelyAbsent(
+                        profileID: profileID, statuses: statuses
+                    ) {
+                        self.uncertainDaemonProfileIDs.remove(profileID)
+                    }
                 } catch {
+                    self.uncertainDaemonProfileIDs.insert(profileID)
                     refreshedStatus = .reasserting
                 }
                 DispatchQueue.main.async {

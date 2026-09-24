@@ -42,5 +42,7 @@ grep -Eq -- '--daemon-self-check' "$repo_dir/Sources/WireGuardApp/UI/macOS/AppDe
 grep -Eq 'store\.save\(' "$manager"
 grep -Eq 'store\.delete\(' "$manager"
 grep -Eq 'guard tunnel\.status == \.inactive else' "$manager"
+grep -Eq 'uncertainDaemonProfileIDs\.remove\(profileID\)' "$manager"
+grep -Eq 'DaemonTunnelState\.isAuthoritativelyAbsent' "$manager"
 
 echo "unsigned daemon GUI target self-check passed"
