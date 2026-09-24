@@ -57,6 +57,11 @@ daemon's `hello` response confirms protocol version 1. If the daemon is absent
 or incompatible, update checks stay disabled; install the matching reviewed
 daemon package manually before using the GUI updater.
 
+Release blocker: `hello` currently proves protocol compatibility only. It does
+not identify a daemon build, so it cannot detect a future same-protocol feature
+drift. Do not configure a public `SUFeedURL` until the release process ties a
+GUI artifact to a reviewed daemon artifact and verifies their compatibility.
+
 Generate the EdDSA key once on a trusted release Mac with Sparkle's
 `generate_keys` tool. Put the public value in the release build and retain the
 private value only in that Mac's Keychain or an encrypted GitHub Actions secret.
