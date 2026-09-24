@@ -24,4 +24,4 @@ jobs:
           go build -C Sources/WireGuardKitGo -o ../../out/amneziawg-go github.com/amnezia-vpn/amneziawg-go/v3
           sudo install -d -o root -g wheel -m 0755 /usr/local/libexec
           sudo install -o root -g wheel -m 0755 out/amneziawg-go /usr/local/libexec/amneziawg-go-daemon-three-poc
-          sudo env AMNEZIAWG_DAEMON_RUNTIME=1 AMNEZIAWG_DAEMON_BINARY=/usr/local/libexec/amneziawg-go-daemon-three-poc go test -C scripts/daemon-control -v -tags manualruntime -run TestManualSyntheticThreeTunnelLifecycle -count=1
+          sudo env AMNEZIAWG_DAEMON_RUNTIME=1 AMNEZIAWG_DAEMON_BINARY=/usr/local/libexec/amneziawg-go-daemon-three-poc go test -C scripts/daemon-control -v -tags manualruntime -run 'TestManual(SyntheticThreeTunnelLifecycle|RoutePlanStartAndCleanup)' -count=1

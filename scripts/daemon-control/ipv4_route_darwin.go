@@ -169,6 +169,7 @@ import (
 type IPv4Route struct {
 	name, local          string
 	target               netip.Addr
+	routeEnabled         bool
 	iface                *net.Interface
 	addressSet, routeSet bool
 	initialFlags         int
@@ -194,20 +195,37 @@ func syntheticBroadaddrMatchesLocal(local string) bool {
 }
 
 func configureSyntheticIPv4Route(process *tunnelProcess, localText, targetText string) (*IPv4Route, error) {
-	if process == nil || os.Geteuid() != 0 || !utunName.MatchString(process.name) {
-		return nil, errors.New("synthetic IPv4 route requires root and a utun")
-	}
 	local, target, err := syntheticIPv4(localText, targetText)
 	if err != nil {
 		return nil, err
+	}
+	return configureIPv4Address(process, local, &target)
+}
+
+func configureIPv4AddressOnly(process *tunnelProcess, localText string) (*IPv4Route, error) {
+	local, err := netip.ParseAddr(localText)
+	if err != nil || !local.Is4() || !local.IsGlobalUnicast() {
+		return nil, errors.New("invalid IPv4 local address")
+	}
+	return configureIPv4Address(process, local, nil)
+}
+
+func configureIPv4Address(process *tunnelProcess, local netip.Addr, target *netip.Addr) (*IPv4Route, error) {
+	if process == nil || os.Geteuid() != 0 || !utunName.MatchString(process.name) {
+		return nil, errors.New("synthetic IPv4 route requires root and a utun")
 	}
 	iface, err := net.InterfaceByName(process.name)
 	if err != nil {
 		return nil, err
 	}
-	configured := &IPv4Route{name: process.name, local: local.String(), target: target, iface: iface}
-	if existing, err := configured.requestRouteLookup(); err == nil && existing.Err == nil && configured.isTargetHostRoute(existing) {
-		return nil, errors.New("refusing to replace an existing route")
+	configured := &IPv4Route{name: process.name, local: local.String(), iface: iface, routeEnabled: target != nil}
+	if target != nil {
+		configured.target = *target
+	}
+	if configured.routeEnabled {
+		if existing, err := configured.requestRouteLookup(); err == nil && existing.Err == nil && configured.isTargetHostRoute(existing) {
+			return nil, errors.New("refusing to replace an existing route")
+		}
 	}
 	if err := configured.preflightAddress(); err != nil {
 		return nil, err
@@ -227,14 +245,18 @@ func configureSyntheticIPv4Route(process *tunnelProcess, localText, targetText s
 	if flags&int(C.IFF_UP) == 0 {
 		configured.upChanged = true
 		if err := configured.setInterfaceFlags(flags | int(C.IFF_UP)); err != nil {
-			return nil, errors.Join(err, configured.Close())
+			return configured.cleanupFailedAddressSetup(err)
 		}
 	}
-	if err := configured.add(); err != nil {
-		return configured.cleanupFailedRouteAdd(err)
+	if configured.routeEnabled {
+		if err := configured.add(); err != nil {
+			return configured.cleanupFailedRouteAdd(err)
+		}
 	}
-	if err := configured.verify(); err != nil {
-		return configured.cleanupFailedRouteAdd(err)
+	if configured.routeEnabled {
+		if err := configured.verify(); err != nil {
+			return configured.cleanupFailedRouteAdd(err)
+		}
 	}
 	return configured, nil
 }
@@ -389,15 +411,17 @@ func (configured *IPv4Route) proveAbsentAfterTunnelExit() error {
 	if state := int(C.address_ownership(cName, cLocal)); state != addressStateAbsent {
 		return requireAddressState("verify vanished synthetic IPv4 address", state, addressStateAbsent)
 	}
-	message, err := configured.requestTargetLookup()
-	if err != nil {
-		return err
-	}
-	if message.Err != nil {
-		return message.Err
-	}
-	if configured.isTargetHostRoute(message) {
-		return errors.New("synthetic route remains after backend exit")
+	if configured.routeEnabled {
+		message, err := configured.requestTargetLookup()
+		if err != nil {
+			return err
+		}
+		if message.Err != nil {
+			return message.Err
+		}
+		if configured.isTargetHostRoute(message) {
+			return errors.New("synthetic route remains after backend exit")
+		}
 	}
 	configured.routeSet = false
 	configured.addressSet = false
@@ -417,6 +441,16 @@ func (configured *IPv4Route) write(kind int) error {
 
 func (configured *IPv4Route) cleanupFailedRouteAdd(err error) (*IPv4Route, error) {
 	if !configured.routeSet {
+		return nil, err
+	}
+	if cleanupErr := configured.Close(); cleanupErr != nil {
+		return configured, errors.Join(err, cleanupErr)
+	}
+	return nil, err
+}
+
+func (configured *IPv4Route) cleanupFailedAddressSetup(err error) (*IPv4Route, error) {
+	if !configured.addressSet {
 		return nil, err
 	}
 	if cleanupErr := configured.Close(); cleanupErr != nil {

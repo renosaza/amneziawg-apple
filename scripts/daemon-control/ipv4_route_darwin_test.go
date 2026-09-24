@@ -76,6 +76,17 @@ func TestSyntheticIPv4CleanupStateTransitions(t *testing.T) {
 	}
 }
 
+func TestFailedAddressSetupRetainsOwnerWhenCloseFails(t *testing.T) {
+	configured := &IPv4Route{addressSet: true}
+	retained, err := configured.cleanupFailedAddressSetup(errors.New("set utun flags"))
+	if err == nil || retained != configured {
+		t.Fatalf("retained=%#v err=%v", retained, err)
+	}
+	if !configured.addressSet {
+		t.Fatal("failed cleanup released address ownership")
+	}
+}
+
 func TestSyntheticIPv4RouteWriteOutcome(t *testing.T) {
 	configured := &IPv4Route{}
 	configured.recordRouteWrite(syscall.RTM_ADD, errRouteOutcomeUnknown)

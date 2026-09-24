@@ -35,8 +35,8 @@ func TestManualRoutePlanStartAndCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const config = "private_key=1111111111111111111111111111111111111111111111111111111111111111\nallowed_ip=198.51.100.0/24\nendpoint=198.51.100.10:1"
-	const plan = `{"local_address":"192.0.2.2/32","routes":[{"destination":"198.51.100.0/24","owner":"tunnel"},{"destination":"198.51.100.10/32","owner":"physicalEndpoint"}]}`
+	const config = "private_key=1111111111111111111111111111111111111111111111111111111111111111\npublic_key=2222222222222222222222222222222222222222222222222222222222222222\nallowed_ip=198.51.100.0/24\nendpoint=198.51.100.20:1"
+	const plan = `{"local_address":"192.0.2.3/32","routes":[{"destination":"198.51.100.0/24","owner":"tunnel"},{"destination":"198.51.100.20/32","owner":"physicalEndpoint"}]}`
 	frame, err := json.Marshal(request{Version: 1, Operation: "start", ProfileID: profileID, Config: config, RoutePlan: json.RawMessage(plan)})
 	if err != nil {
 		t.Fatal(err)
@@ -58,12 +58,13 @@ func TestManualRoutePlanStartAndCleanup(t *testing.T) {
 	if err := process.precedenceEndpointRoute.verify(); err != nil {
 		t.Fatal(err)
 	}
+	addressRoute, splitRoute, endpointRoute := process.route, process.fallbackRoute, process.precedenceEndpointRoute
 	failedFrame, err := json.Marshal(request{Version: 1, Operation: "start", ProfileID: profileIDTwo, Config: config, RoutePlan: json.RawMessage(plan)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	failed := exchange(t, server, 501, requestFrame(t, string(failedFrame)))
-	if failed.OK || failed.Error != "start_failed" {
+	if failed.OK || failed.Error != "planned_session_active" {
 		t.Fatalf("route-plan collision start: %#v", failed)
 	}
 	if _, found := server.profiles[profileIDTwo]; found {
@@ -81,13 +82,13 @@ func TestManualRoutePlanStartAndCleanup(t *testing.T) {
 	if stopped := server.apply(request{Operation: "stop", ProfileID: profileID}); !stopped.OK {
 		t.Fatalf("route-plan stop: %#v", stopped)
 	}
-	if err := process.route.proveAbsentAfterTunnelExit(); err != nil {
+	if err := addressRoute.proveAbsentAfterTunnelExit(); err != nil {
 		t.Fatal(err)
 	}
-	if err := process.fallbackRoute.proveAbsentAfterTunnelExit(); err != nil {
+	if err := splitRoute.proveAbsentAfterTunnelExit(); err != nil {
 		t.Fatal(err)
 	}
-	if err := process.precedenceEndpointRoute.proveAbsent(); err != nil {
+	if err := endpointRoute.proveAbsent(); err != nil {
 		t.Fatal(err)
 	}
 }

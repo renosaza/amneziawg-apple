@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -99,7 +100,7 @@ func (backend *tunnelBackend) Start(config string) (Session, error) {
 }
 
 func (backend *tunnelBackend) StartWithRoutePlan(config string, plan routePlan) (Session, error) {
-	if !backend.allowRoutePlanRuntime || !isManualRoutePlan(plan) {
+	if !backend.allowRoutePlanRuntime {
 		return Session{}, errors.New("route plan runtime unavailable")
 	}
 	return backend.start(config, &plan)
@@ -157,15 +158,41 @@ func (backend *tunnelBackend) start(config string, plan *routePlan) (Session, er
 		backend.lastStartStage = "uapi"
 		err = uapi(name, "set=1\n"+config)
 	}
-	if err == nil && backend.syntheticIPv4Routes {
+	if err == nil && plan != nil {
+		local, prefix, endpoint, parseErr := manualPlanValues(*plan)
+		if parseErr != nil {
+			err = parseErr
+		} else {
+			backend.lastStartStage = "utun-address"
+			process.route, err = configureIPv4AddressOnly(process, local.String())
+			if err == nil {
+				backend.lastStartStage = "physical-endpoint"
+				process.precedenceEndpointRoute, err = configureSyntheticPrecedenceEndpointRoute(endpoint.String())
+			}
+			if err == nil {
+				backend.lastStartStage = "split-route"
+				process.fallbackRoute, err = configureSyntheticSplitRoute(process, prefix)
+			}
+			if err == nil {
+				err = process.precedenceEndpointRoute.verify()
+			}
+			if err == nil {
+				err = process.fallbackRoute.verify()
+			}
+			if err == nil {
+				err = process.route.requireOwnedAddress()
+			}
+		}
+	}
+	if err == nil && plan == nil && backend.syntheticIPv4Routes {
 		backend.lastStartStage = "utun-address"
 		err = backend.configureSyntheticIPv4Route(process)
 	}
-	if err == nil && backend.syntheticEndpointRoutes {
+	if err == nil && plan == nil && backend.syntheticEndpointRoutes {
 		backend.lastStartStage = "endpoint"
 		err = backend.configureSyntheticEndpointRoute(process)
 	}
-	if err == nil && backend.syntheticFallbackRoute {
+	if err == nil && plan == nil && backend.syntheticFallbackRoute {
 		backend.lastStartStage = "split-route"
 		err = backend.configureSyntheticFallbackRoute(process)
 	}
@@ -177,6 +204,34 @@ func (backend *tunnelBackend) start(config string, plan *routePlan) (Session, er
 	}
 	backend.lastStartStage = ""
 	return Session{value: process}, nil
+}
+
+func manualPlanValues(plan routePlan) (netip.Addr, netip.Prefix, netip.Addr, error) {
+	local, err := netip.ParsePrefix(plan.LocalAddress)
+	if err != nil || local.Bits() != 32 {
+		return netip.Addr{}, netip.Prefix{}, netip.Addr{}, errors.New("invalid manual route plan")
+	}
+	var routes []routePlanRoute
+	if json.Unmarshal(plan.Routes, &routes) != nil || len(routes) != 2 {
+		return netip.Addr{}, netip.Prefix{}, netip.Addr{}, errors.New("invalid manual route plan")
+	}
+	var prefix netip.Prefix
+	var endpoint netip.Addr
+	for _, route := range routes {
+		parsed, err := netip.ParsePrefix(route.Destination)
+		if err != nil {
+			return netip.Addr{}, netip.Prefix{}, netip.Addr{}, err
+		}
+		if route.Owner == "tunnel" {
+			prefix = parsed
+		} else if route.Owner == "physicalEndpoint" {
+			endpoint = parsed.Addr()
+		}
+	}
+	if !local.Addr().Is4() || !syntheticIPv4Prefix.Contains(local.Addr()) || !prefix.IsValid() || !endpoint.IsValid() {
+		return netip.Addr{}, netip.Prefix{}, netip.Addr{}, errors.New("invalid manual route plan")
+	}
+	return local.Addr(), prefix, endpoint, nil
 }
 
 func (backend *tunnelBackend) Status(session Session) error {
