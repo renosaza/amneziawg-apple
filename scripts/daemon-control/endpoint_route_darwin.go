@@ -74,6 +74,25 @@ func (configured *PhysicalEndpointRoute) findBaseRoute(target netip.Addr) (physi
 	return selectPhysicalBaseRoute(messages, target)
 }
 
+func (configured *PhysicalEndpointRoute) findReplacementBaseRoute() (physicalBaseRoute, error) {
+	rib, err := route.FetchRIB(syscall.AF_INET, route.RIBTypeRoute, 0)
+	if err != nil {
+		return physicalBaseRoute{}, err
+	}
+	messages, err := route.ParseRIB(route.RIBTypeRoute, rib)
+	if err != nil {
+		return physicalBaseRoute{}, err
+	}
+	filtered := make([]route.Message, 0, len(messages))
+	for _, message := range messages {
+		if routeMessage, ok := message.(*route.RouteMessage); ok && configured.ownsKnownHostRoute(routeMessage) {
+			continue
+		}
+		filtered = append(filtered, message)
+	}
+	return selectPhysicalBaseRoute(filtered, configured.target)
+}
+
 // selectPhysicalBaseRoute chooses the most-specific physical RIB route for a
 // planned endpoint. An existing non-host tunnel route may be the effective
 // route, so it is deliberately ignored here. An exact host route is always
@@ -268,6 +287,92 @@ func physicalRouteMetadata(message *route.RouteMessage) (netip.Addr, int, string
 
 func (configured *PhysicalEndpointRoute) add() error { return configured.write(syscall.RTM_ADD) }
 
+// Rebind changes the daemon-owned host route in place. It never deletes the
+// old route first: uncertainty keeps the old route and reports degradation.
+func (configured *PhysicalEndpointRoute) Rebind() (bool, error) {
+	if !configured.routeSet {
+		return false, errors.New("endpoint route is not owned")
+	}
+	next, err := configured.findReplacementBaseRoute()
+	if err != nil {
+		return false, fmt.Errorf("endpoint rebind preflight: %w", err)
+	}
+	decision, err := endpointRebindDecisionFor(configured.currentBase(), next)
+	if err != nil {
+		return false, err
+	}
+	if decision == endpointRebindUnchanged {
+		return false, errors.Join(configured.verify(), configured.baseRouteInRIBError())
+	}
+	if err := configured.writeWithBase(syscall.RTM_CHANGE, next); err != nil {
+		return configured.reconcileRebindFailure(next, err)
+	}
+	if err := configured.verifyWithBase(next); err != nil {
+		return false, err
+	}
+	configured.setBase(next)
+	return true, nil
+}
+
+type endpointRebindDecision uint8
+
+const (
+	endpointRebindUnchanged endpointRebindDecision = iota
+	endpointRebindChange
+)
+
+func endpointRebindDecisionFor(current, next physicalBaseRoute) (endpointRebindDecision, error) {
+	if !validPhysicalBaseRoute(current) || !validPhysicalBaseRoute(next) {
+		return 0, errors.New("endpoint rebind physical route unavailable")
+	}
+	if samePhysicalBaseRoute(current, next) {
+		return endpointRebindUnchanged, nil
+	}
+	return endpointRebindChange, nil
+}
+
+func validPhysicalBaseRoute(base physicalBaseRoute) bool {
+	return base.prefix.IsValid() && base.gateway.IsValid() && base.gateway.IsGlobalUnicast() && base.iface != nil && base.iface.Index > 0 && base.iface.Name != "" && base.iface.Flags&net.FlagLoopback == 0 && !utunName.MatchString(base.iface.Name)
+}
+
+func samePhysicalBaseRoute(left, right physicalBaseRoute) bool {
+	return left.prefix == right.prefix && left.gateway == right.gateway && left.iface != nil && right.iface != nil && left.iface.Index == right.iface.Index && left.iface.Name == right.iface.Name
+}
+
+func (configured *PhysicalEndpointRoute) currentBase() physicalBaseRoute {
+	return physicalBaseRoute{prefix: configured.basePrefix, gateway: configured.gateway, iface: configured.iface}
+}
+
+func (configured *PhysicalEndpointRoute) setBase(base physicalBaseRoute) {
+	configured.basePrefix, configured.gateway, configured.iface = base.prefix, base.gateway, base.iface
+}
+
+func (configured *PhysicalEndpointRoute) reconcileRebindFailure(next physicalBaseRoute, writeErr error) (bool, error) {
+	if configured.verifyWithBase(next) == nil {
+		configured.setBase(next)
+		return true, nil
+	}
+	if configured.verify() == nil {
+		return false, fmt.Errorf("endpoint rebind rejected: %w", writeErr)
+	}
+	return false, fmt.Errorf("endpoint rebind outcome unknown: %w", writeErr)
+}
+
+func (configured *PhysicalEndpointRoute) verifyWithBase(base physicalBaseRoute) error {
+	previous := configured.currentBase()
+	configured.setBase(base)
+	err := errors.Join(configured.verify(), configured.baseRouteInRIBError())
+	configured.setBase(previous)
+	return err
+}
+
+func (configured *PhysicalEndpointRoute) baseRouteInRIBError() error {
+	if configured.baseRouteInRIB() {
+		return nil
+	}
+	return errors.New("endpoint base route changed")
+}
+
 func (configured *PhysicalEndpointRoute) Close() error {
 	if !configured.routeSet {
 		return nil
@@ -314,6 +419,14 @@ func (configured *PhysicalEndpointRoute) write(kind int) error {
 		return err
 	}
 	configured.recordRouteWrite(kind, message.Err)
+	return message.Err
+}
+
+func (configured *PhysicalEndpointRoute) writeWithBase(kind int, base physicalBaseRoute) error {
+	message, err := requestRouteMessage(kind, syscall.RTF_UP|syscall.RTF_HOST|syscall.RTF_GATEWAY|syscall.RTF_STATIC, configured.routeAddrsFor(base))
+	if err != nil {
+		return err
+	}
 	return message.Err
 }
 
@@ -393,11 +506,15 @@ func matchesRIBPhysicalRoute(message *route.RouteMessage, gateway netip.Addr, if
 }
 
 func (configured *PhysicalEndpointRoute) routeAddrs() []route.Addr {
+	return configured.routeAddrsFor(configured.currentBase())
+}
+
+func (configured *PhysicalEndpointRoute) routeAddrsFor(base physicalBaseRoute) []route.Addr {
 	addrs := make([]route.Addr, syscall.RTAX_IFP+1)
 	addrs[syscall.RTAX_DST] = &route.Inet4Addr{IP: configured.target.As4()}
-	addrs[syscall.RTAX_GATEWAY] = &route.Inet4Addr{IP: configured.gateway.As4()}
+	addrs[syscall.RTAX_GATEWAY] = &route.Inet4Addr{IP: base.gateway.As4()}
 	addrs[syscall.RTAX_NETMASK] = &route.Inet4Addr{IP: [4]byte{255, 255, 255, 255}}
-	addrs[syscall.RTAX_IFP] = &route.LinkAddr{Index: configured.iface.Index, Name: configured.iface.Name}
+	addrs[syscall.RTAX_IFP] = &route.LinkAddr{Index: base.iface.Index, Name: base.iface.Name}
 	return addrs
 }
 
@@ -419,6 +536,25 @@ func (configured *PhysicalEndpointRoute) ownsRoute(message *route.RouteMessage) 
 
 func (configured *PhysicalEndpointRoute) ownsRIBRoute(message *route.RouteMessage) bool {
 	return configured.ownsRIBRouteWithInterfaceByIndex(message, net.InterfaceByIndex)
+}
+
+// ownsKnownHostRoute deliberately avoids a live interface lookup. During an
+// uplink transition the old interface may already be gone, but its exact,
+// daemon-owned static host route must still be excluded from base-route
+// discovery before it can be changed in place.
+func (configured *PhysicalEndpointRoute) ownsKnownHostRoute(message *route.RouteMessage) bool {
+	if !configured.isTargetHostRoute(message) || configured.iface == nil || message.Flags&(syscall.RTF_STATIC|syscall.RTF_GATEWAY) != syscall.RTF_STATIC|syscall.RTF_GATEWAY || message.Index != configured.iface.Index {
+		return false
+	}
+	gateway, gatewayOK := routeAddress(message, syscall.RTAX_GATEWAY).(*route.Inet4Addr)
+	if !gatewayOK || gateway.IP != configured.gateway.As4() {
+		return false
+	}
+	if address := routeAddress(message, syscall.RTAX_IFP); address != nil {
+		link, ok := address.(*route.LinkAddr)
+		return ok && link.Index == configured.iface.Index && link.Name == configured.iface.Name
+	}
+	return true
 }
 
 func (configured *PhysicalEndpointRoute) ownsRIBRouteWithInterfaceByIndex(message *route.RouteMessage, interfaceByIndex func(int) (*net.Interface, error)) bool {

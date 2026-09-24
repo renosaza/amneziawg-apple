@@ -40,6 +40,21 @@ type capabilityFakeBackend struct {
 	values []string
 }
 
+type rebindFakeBackend struct {
+	fakeBackend
+	fail map[any]bool
+}
+
+func (backend *rebindFakeBackend) Rebind(session Session) error {
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if backend.fail[session.value] {
+		backend.status = errors.New("synthetic rebind failure")
+		return backend.status
+	}
+	return nil
+}
+
 func (backend *capabilityFakeBackend) capabilities() []string { return backend.values }
 
 func TestHelloReportsOnlyBackendCapabilities(t *testing.T) {
@@ -107,6 +122,15 @@ func (backend *fakeBackend) Status(Session) error {
 	backend.mu.Lock()
 	defer backend.mu.Unlock()
 	return backend.status
+}
+
+func (backend *rebindFakeBackend) Status(session Session) error {
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if backend.fail[session.value] {
+		return errors.New("synthetic rebind failure")
+	}
+	return nil
 }
 
 func (backend *fakeBackend) counts() (starts, stops int) {
@@ -182,6 +206,27 @@ func TestStartStopStatusAndList(t *testing.T) {
 	notFound := exchange(t, server, 501, requestFrame(t, `{"version":1,"operation":"status","profile_id":"`+profileID+`"}`))
 	if notFound.OK || notFound.Error != "not_found" {
 		t.Fatalf("unexpected missing status response: %#v", notFound)
+	}
+}
+
+func TestRebindFailureDegradesOnlyThatSession(t *testing.T) {
+	backend := &rebindFakeBackend{fail: make(map[any]bool)}
+	server, err := NewServerWithBackend(501, backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{profileID, profileIDTwo} {
+		if response := server.apply(request{Operation: "start", ProfileID: id, Config: syntheticConfig}); !response.OK {
+			t.Fatalf("start %s: %#v", id, response)
+		}
+	}
+	backend.fail[1] = true
+	if err := server.Rebind(); err == nil {
+		t.Fatal("rebind hid a failed session")
+	}
+	listed := server.apply(request{Operation: "list"})
+	if !listed.OK || len(listed.Profiles) != 2 || listed.Profiles[0].Status != "degraded" || listed.Profiles[1].Status != "running" {
+		t.Fatalf("rebind changed sibling state: %#v", listed)
 	}
 }
 

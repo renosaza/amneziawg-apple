@@ -48,13 +48,19 @@ if an active peer endpoint falls inside its effective tunnel prefixes, or if a
 candidate peer endpoint does so for an active full plan. This prevents a
 corporate endpoint from being nested through the full tunnel.
 
-This does not add IPv6, DNS, hostname resolution, automatic gateway rebinding,
-or multi-profile full-route Manager activation. The backend records and verifies a
+This does not add IPv6, DNS, hostname resolution, or multi-profile full-route
+Manager activation. The backend records and verifies a
 physical endpoint `/32` before installing the complement routes. A network
-change while a session is active is unsupported: stop it and start it again
-after the network has settled. Until a rebind design is implemented and
-runtime-validated, do not treat an existing daemon session as safe after a
-Wi-Fi, Ethernet, sleep, or wake transition. An exact endpoint host route,
+change while a session is active is unsupported by default: stop it and start
+it again after the network has settled. The separate root-controlled
+`--allow-route-plan-network-rebind` flag polls every two seconds and, only for
+route-plan sessions, may update the daemon-owned endpoint `/32` with
+`RTM_CHANGE` after a new physical RIB route is unambiguous. It never deletes
+the old host route first. A rejected or uncertain kernel result leaves the
+session degraded and does not modify sibling sessions. A successful change is
+verified before an endpoint-only UAPI refresh that retains no private key.
+This is experimental and has no Wi-Fi/Ethernet/sleep runtime proof yet; do not
+treat an existing daemon session as safe after a network transition. An exact endpoint host route,
 including one through `utun`, is rejected rather than replaced. No default or
 full-route PF_ROUTE mutation has been run on a developer machine or CI runner.
 This does not add multi-profile Manager activation. The Manager remains deliberately

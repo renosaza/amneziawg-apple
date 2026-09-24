@@ -99,6 +99,7 @@ func main() {
 	binaryPath := flag.String("binary", "", "trusted absolute amneziawg-go path")
 	allowRoutePlans := flag.Bool("allow-route-plan-runtime", false, "enable the experimental root-controlled route-plan runtime")
 	allowFullRoutes := flag.Bool("allow-full-route-runtime", false, "enable experimental logical IPv4 full-route plans (requires -allow-route-plan-runtime)")
+	allowNetworkRebind := flag.Bool("allow-route-plan-network-rebind", false, "poll and rebind experimental route-plan endpoint routes (requires -allow-route-plan-runtime)")
 	checkIdle := flag.Bool("check-idle", false, "exit successfully only when the daemon has no sessions")
 	prepareStop := flag.Bool("prepare-stop", false, "atomically refuse new sessions when the daemon is idle")
 	manualRoutePlanStart := flag.Bool("manual-route-plan-start", false, "send the fixed synthetic route-plan start request")
@@ -227,8 +228,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: daemon-control-poc -socket /var/run/name.sock -uid <macOS-uid> -binary /root-owned/amneziawg-go")
 		os.Exit(2)
 	}
-	if *allowFullRoutes && !*allowRoutePlans {
-		fmt.Fprintln(os.Stderr, "-allow-full-route-runtime requires -allow-route-plan-runtime")
+	if (*allowFullRoutes || *allowNetworkRebind) && !*allowRoutePlans {
+		fmt.Fprintln(os.Stderr, "route-plan runtime is required for full-route or network-rebind flags")
 		os.Exit(2)
 	}
 	uid, err := parseUID(*uidText)
@@ -254,6 +255,11 @@ func main() {
 	defer listener.Close()
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	rebindStop := make(chan struct{})
+	defer close(rebindStop)
+	if *allowNetworkRebind {
+		go pollRebind(server, rebindStop)
+	}
 	go func() {
 		<-signals
 		_ = listener.Close()
@@ -268,6 +274,19 @@ func main() {
 	if err := cleanup(server); err != nil {
 		fmt.Fprintln(os.Stderr, "daemon cleanup failed after retries")
 		os.Exit(1)
+	}
+}
+
+func pollRebind(server *daemoncontrol.Server, stop <-chan struct{}) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			_ = server.Rebind()
+		}
 	}
 }
 

@@ -61,6 +61,9 @@ type tunnelProcess struct {
 	fullRoutes              []*SyntheticFallbackRoute
 	precedenceEndpointRoute *PhysicalEndpointRoute
 	routeSlot               int
+	degraded                bool
+	peerPublicKey           string
+	peerEndpoint            string
 }
 
 func newTunnelBackend(binary string) (Backend, error) {
@@ -178,6 +181,8 @@ func (backend *tunnelBackend) start(config string, plan *routePlan) (Session, er
 		local, routes, endpoint, fullRoute, parseErr := plannedRouteValues(*plan)
 		if parseErr != nil {
 			err = parseErr
+		} else if process.peerPublicKey, process.peerEndpoint, err = plannedPeerEndpointReset(config, endpoint); err != nil {
+			backend.lastStartStage = "uapi-endpoint"
 		} else {
 			backend.lastStartStage = "utun-address"
 			process.route, err = configureIPv4AddressOnly(process, local.String())
@@ -284,7 +289,58 @@ func (backend *tunnelBackend) Status(session Session) error {
 		return errors.New("owned backend exited")
 	default:
 	}
+	if process.degraded {
+		return errors.New("endpoint route needs rebind")
+	}
 	return uapi(process.name, "get=1")
+}
+
+// Rebind is called only by the root daemon's opt-in watcher while Server's
+// lifecycle lock is held. It touches just this process's owned endpoint route.
+func (backend *tunnelBackend) Rebind(session Session) error {
+	process, ok := session.value.(*tunnelProcess)
+	if !ok || process.precedenceEndpointRoute == nil {
+		return nil
+	}
+	changed, err := process.precedenceEndpointRoute.Rebind()
+	if err != nil {
+		process.degraded = true
+		return err
+	}
+	if changed {
+		if err := uapi(process.name, "set=1\npublic_key="+process.peerPublicKey+"\nendpoint="+process.peerEndpoint); err != nil {
+			process.degraded = true
+			return err
+		}
+	}
+	process.degraded = false
+	return nil
+}
+
+// plannedPeerEndpointReset keeps only a validated public peer identifier and
+// literal endpoint. Private key material is never retained or replayed.
+func plannedPeerEndpointReset(config string, expected netip.Addr) (string, string, error) {
+	var publicKey, endpoint string
+	for _, line := range strings.Split(config, "\n") {
+		key, value, _ := strings.Cut(line, "=")
+		switch key {
+		case "public_key":
+			if publicKey != "" || len(value) != 64 || strings.Trim(value, "0123456789abcdef") != "" {
+				return "", "", errors.New("invalid planned peer public key")
+			}
+			publicKey = value
+		case "endpoint":
+			address, err := netip.ParseAddrPort(value)
+			if err != nil || endpoint != "" || address.Addr() != expected {
+				return "", "", errors.New("invalid planned peer endpoint")
+			}
+			endpoint = address.String()
+		}
+	}
+	if publicKey == "" || endpoint == "" {
+		return "", "", errors.New("planned peer endpoint unavailable")
+	}
+	return publicKey, endpoint, nil
 }
 
 func (backend *tunnelBackend) Stop(session Session) error {
