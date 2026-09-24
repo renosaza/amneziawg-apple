@@ -75,6 +75,7 @@ type Server struct {
 	backend     Backend
 	connections chan struct{}
 	closed      bool
+	plannedID   string
 	closeMu     sync.Mutex
 }
 
@@ -160,6 +161,9 @@ func (server *Server) apply(request request) response {
 		if len(server.profiles) == maxProfiles {
 			return response{Error: "capacity"}
 		}
+		if request.RoutePlan != nil && server.plannedID != "" {
+			return response{Error: "planned_session_active"}
+		}
 		if err := validRoutePlanMatchesConfig(request.RoutePlan, request.Config); err != nil {
 			return response{Error: "invalid_request"}
 		}
@@ -171,6 +175,9 @@ func (server *Server) apply(request request) response {
 			return response{Error: "start_failed"}
 		}
 		server.profiles[request.ProfileID] = session
+		if request.RoutePlan != nil {
+			server.plannedID = request.ProfileID
+		}
 		return response{OK: true, Profile: &Profile{ID: request.ProfileID, Status: "running"}}
 	case "stop":
 		session, found := server.profiles[request.ProfileID]
@@ -181,6 +188,9 @@ func (server *Server) apply(request request) response {
 			return response{Error: "stop_failed"}
 		}
 		delete(server.profiles, request.ProfileID)
+		if server.plannedID == request.ProfileID {
+			server.plannedID = ""
+		}
 		return response{OK: true, Profile: &Profile{ID: request.ProfileID, Status: "stopped"}}
 	case "status":
 		session, found := server.profiles[request.ProfileID]
