@@ -42,9 +42,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          build_products="$RUNNER_TEMP/amneziawg-build-products"
           for target in $MACOS_APP_TARGETS; do
-            xcodebuild -project WireGuard.xcodeproj -target "$target" -configuration Debug -sdk macosx CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+            xcodebuild -project WireGuard.xcodeproj -target "$target" -configuration Debug -sdk macosx SYMROOT="$build_products" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
           done
+          scripts/test-unsigned-daemon-gui-startup.sh "$build_products/Debug/AmneziaWG.app"
       - name: Run all SwiftPM WireGuardKit tests
         shell: bash
         run: |

@@ -28,6 +28,7 @@ if grep -Eq 'NETunnelProviderManager|sendProviderMessage|DaemonControlClient.*\.
     exit 1
 fi
 grep -Eq 'DaemonControlClient\(socketPath: controlSocketPath\)\.list\(\)' "$manager"
+grep -Eq -- '--daemon-self-check' "$repo_dir/Sources/WireGuardApp/UI/macOS/AppDelegate.swift"
 grep -Eq 'store\.save\(' "$manager"
 grep -Eq 'store\.delete\(' "$manager"
 grep -Eq 'guard tunnel\.status == \.inactive else' "$manager"
