@@ -19,13 +19,14 @@ var syntheticEndpointPrefix = netip.MustParsePrefix("203.0.113.0/24")
 var syntheticPrecedencePrefix = netip.MustParsePrefix("198.51.100.0/24")
 var syntheticPhysicalProbe = netip.MustParseAddr("203.0.113.254")
 
-// PhysicalEndpointRoute owns one synthetic endpoint host route via the active physical gateway.
+// PhysicalEndpointRoute owns, or safely reuses, one endpoint host route via the active physical gateway.
 type PhysicalEndpointRoute struct {
 	target, gateway netip.Addr
 	prefix          netip.Prefix
 	basePrefix      netip.Prefix
 	iface           *net.Interface
 	routeSet        bool
+	reused          bool
 }
 
 type physicalBaseRoute struct {
@@ -37,6 +38,7 @@ type physicalBaseRoute struct {
 const (
 	physicalEndpointStageEffectiveLookup = "physical_endpoint_effective_lookup"
 	physicalEndpointStageRIBSelection    = "physical_endpoint_rib_selection"
+	physicalEndpointStageReuseHost       = "physical_endpoint_reuse_host"
 	physicalEndpointStageRTMAdd          = "physical_endpoint_rtm_add"
 	physicalEndpointStageVerifyHost      = "physical_endpoint_verify_host"
 	physicalEndpointStageVerifyBaseRIB   = "physical_endpoint_verify_base_rib"
@@ -81,14 +83,18 @@ func configurePlannedPhysicalEndpointRoute(target netip.Addr) (*PhysicalEndpoint
 		}
 		return nil, failedPhysicalEndpointRoute(physicalEndpointStageEffectiveLookup, fmt.Errorf("planned endpoint preflight-get: %w", errors.Join(err, routeErr)))
 	}
-	if configured.isTargetHostRoute(existing) {
-		return nil, failedPhysicalEndpointRoute(physicalEndpointStageEffectiveLookup, errors.New("planned endpoint preflight-host-collision"))
-	}
-	base, err := configured.findBaseRoute(target)
+	base, err := configured.findBaseRoute(target, configured.isTargetHostRoute(existing))
 	if err != nil {
 		return nil, failedPhysicalEndpointRoute(physicalEndpointStageRIBSelection, fmt.Errorf("planned endpoint preflight-rib: %w", err))
 	}
 	configured.basePrefix, configured.gateway, configured.iface = base.prefix, base.gateway, base.iface
+	if configured.isTargetHostRoute(existing) {
+		if !configured.matchesReusableHostRoute(existing) {
+			return nil, failedPhysicalEndpointRoute(physicalEndpointStageReuseHost, errPhysicalEndpointReuseRejected)
+		}
+		configured.reused = true
+		return configured, nil
+	}
 	if err := configured.add(); err != nil {
 		return configured.cleanupFailedRouteAdd(failedPhysicalEndpointRoute(physicalEndpointStageRTMAdd, fmt.Errorf("planned endpoint add: %w", err)))
 	}
@@ -101,7 +107,7 @@ func configurePlannedPhysicalEndpointRoute(target netip.Addr) (*PhysicalEndpoint
 	return configured, nil
 }
 
-func (configured *PhysicalEndpointRoute) findBaseRoute(target netip.Addr) (physicalBaseRoute, error) {
+func (configured *PhysicalEndpointRoute) findBaseRoute(target netip.Addr, ignoreTargetHost bool) (physicalBaseRoute, error) {
 	rib, err := route.FetchRIB(syscall.AF_INET, route.RIBTypeRoute, 0)
 	if err != nil {
 		return physicalBaseRoute{}, err
@@ -110,7 +116,7 @@ func (configured *PhysicalEndpointRoute) findBaseRoute(target netip.Addr) (physi
 	if err != nil {
 		return physicalBaseRoute{}, err
 	}
-	return selectPhysicalBaseRoute(messages, target)
+	return selectPhysicalBaseRoute(messages, target, ignoreTargetHost)
 }
 
 func (configured *PhysicalEndpointRoute) findReplacementBaseRoute() (physicalBaseRoute, error) {
@@ -129,18 +135,18 @@ func (configured *PhysicalEndpointRoute) findReplacementBaseRoute() (physicalBas
 		}
 		filtered = append(filtered, message)
 	}
-	return selectPhysicalBaseRoute(filtered, configured.target)
+	return selectPhysicalBaseRoute(filtered, configured.target, false)
 }
 
 // selectPhysicalBaseRoute chooses the most-specific physical RIB route for a
 // planned endpoint. An existing non-host tunnel route may be the effective
-// route, so it is deliberately ignored here. An exact host route is always
-// rejected, including one through utun, because its ownership is not ours.
-func selectPhysicalBaseRoute(messages []route.Message, target netip.Addr) (physicalBaseRoute, error) {
-	return selectPhysicalBaseRouteWithInterfaceByIndex(messages, target, net.InterfaceByIndex)
+// route, so it is deliberately ignored here. A caller may skip the endpoint's
+// exact host route only while separately proving that it is reusable.
+func selectPhysicalBaseRoute(messages []route.Message, target netip.Addr, ignoreTargetHost bool) (physicalBaseRoute, error) {
+	return selectPhysicalBaseRouteWithInterfaceByIndex(messages, target, ignoreTargetHost, net.InterfaceByIndex)
 }
 
-func selectPhysicalBaseRouteWithInterfaceByIndex(messages []route.Message, target netip.Addr, interfaceByIndex func(int) (*net.Interface, error)) (physicalBaseRoute, error) {
+func selectPhysicalBaseRouteWithInterfaceByIndex(messages []route.Message, target netip.Addr, ignoreTargetHost bool, interfaceByIndex func(int) (*net.Interface, error)) (physicalBaseRoute, error) {
 	var selected physicalBaseRoute
 	for _, parsed := range messages {
 		message, ok := parsed.(*route.RouteMessage)
@@ -151,8 +157,11 @@ func selectPhysicalBaseRouteWithInterfaceByIndex(messages []route.Message, targe
 		if !ok || !prefix.Contains(target) {
 			continue
 		}
-		if prefix.Bits() == 32 {
+		if prefix.Bits() == 32 && !ignoreTargetHost {
 			return physicalBaseRoute{}, errors.New("foreign endpoint host route")
+		}
+		if prefix.Bits() == 32 {
+			continue
 		}
 		gateway, iface, err := physicalRIBRouteMetadata(message, interfaceByIndex)
 		if err != nil {
@@ -330,6 +339,9 @@ func (configured *PhysicalEndpointRoute) add() error { return configured.write(s
 // old route first: uncertainty keeps the old route and reports degradation.
 func (configured *PhysicalEndpointRoute) Rebind() (bool, error) {
 	if !configured.routeSet {
+		if configured.reused {
+			return false, errors.Join(configured.verify(), configured.baseRouteInRIBError())
+		}
 		return false, errors.New("endpoint route is not owned")
 	}
 	next, err := configured.findReplacementBaseRoute()
@@ -464,7 +476,7 @@ func (configured *PhysicalEndpointRoute) verify() error {
 	if err != nil || message.Err != nil {
 		return errors.Join(err, message.Err)
 	}
-	if !configured.ownsRoute(message) {
+	if !configured.ownsRoute(message) && !(configured.reused && configured.matchesReusableHostRoute(message)) {
 		return errors.New("synthetic endpoint route ownership changed")
 	}
 	return nil
@@ -611,7 +623,19 @@ func (configured *PhysicalEndpointRoute) ownsRoute(message *route.RouteMessage) 
 }
 
 func (configured *PhysicalEndpointRoute) ownsRIBRoute(message *route.RouteMessage) bool {
-	return configured.ownsRIBRouteWithInterfaceByIndex(message, net.InterfaceByIndex)
+	return configured.ownsRIBRouteWithInterfaceByIndex(message, net.InterfaceByIndex) || (configured.reused && configured.matchesReusableHostRoute(message))
+}
+
+func (configured *PhysicalEndpointRoute) matchesReusableHostRoute(message *route.RouteMessage) bool {
+	return configured.matchesReusableHostRouteWithInterfaceByIndex(message, net.InterfaceByIndex)
+}
+
+func (configured *PhysicalEndpointRoute) matchesReusableHostRouteWithInterfaceByIndex(message *route.RouteMessage, interfaceByIndex func(int) (*net.Interface, error)) bool {
+	if !configured.isTargetHostRoute(message) || !validPhysicalBaseRoute(configured.currentBase()) {
+		return false
+	}
+	gateway, iface, err := physicalRIBRouteMetadata(message, interfaceByIndex)
+	return err == nil && gateway == configured.gateway && iface.Index == configured.iface.Index && iface.Name == configured.iface.Name
 }
 
 // ownsKnownHostRoute deliberately avoids a live interface lookup. During an

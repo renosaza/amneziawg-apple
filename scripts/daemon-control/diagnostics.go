@@ -43,6 +43,7 @@ type diagnostics struct {
 var diagnosticToken = regexp.MustCompile(`^[a-z0-9_-]{1,64}$`)
 var diagnosticInterface = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,32}$`)
 var diagnosticUTUN = regexp.MustCompile(`^utun[0-9]+$`)
+var errPhysicalEndpointReuseRejected = errors.New("physical endpoint host route does not match the physical uplink")
 
 // NewDiagnostics writes one JSON object per event. Endpoint addresses need a
 // separate explicit opt-in because they are often sensitive operational data.
@@ -101,6 +102,8 @@ func diagnosticErrorCode(err error) string {
 // without emitting a kernel or protocol error string.
 func physicalEndpointDiagnosticCode(err error) string {
 	switch {
+	case errors.Is(err, errPhysicalEndpointReuseRejected):
+		return "host_route_mismatch"
 	case errors.Is(err, syscall.EEXIST):
 		return "eexist"
 	case errors.Is(err, syscall.EINVAL):

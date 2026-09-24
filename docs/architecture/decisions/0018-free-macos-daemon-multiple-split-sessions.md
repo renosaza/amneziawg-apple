@@ -60,8 +60,10 @@ the old host route first. A rejected or uncertain kernel result leaves the
 session degraded and does not modify sibling sessions. A successful change is
 verified before an endpoint-only UAPI refresh that retains no private key.
 This is experimental and has no Wi-Fi/Ethernet/sleep runtime proof yet; do not
-treat an existing daemon session as safe after a network transition. An exact endpoint host route,
-including one through `utun`, is rejected rather than replaced. No default or
+treat an existing daemon session as safe after a network transition. An exact endpoint host route
+is reused without daemon ownership only when its effective lookup and the live physical RIB route
+prove the same gateway and non-`utun` interface; every other exact host route, including one through
+`utun`, is rejected rather than replaced. No default or
 full-route PF_ROUTE mutation has been run on a developer machine or CI runner.
 This does not add multi-profile Manager activation. The Manager remains deliberately
 single-profile until its lifecycle and routing validation can use this daemon
