@@ -34,10 +34,18 @@ func configureSyntheticFallbackRoute(process *tunnelProcess) (*SyntheticFallback
 }
 
 func configureSyntheticSplitRoute(process *tunnelProcess, prefix netip.Prefix) (*SyntheticFallbackRoute, error) {
+	return configureSplitRoute(process, prefix, true)
+}
+
+func configurePlannedSplitRoute(process *tunnelProcess, prefix netip.Prefix) (*SyntheticFallbackRoute, error) {
+	return configureSplitRoute(process, prefix, false)
+}
+
+func configureSplitRoute(process *tunnelProcess, prefix netip.Prefix, synthetic bool) (*SyntheticFallbackRoute, error) {
 	if process == nil || os.Geteuid() != 0 || !utunName.MatchString(process.name) {
 		return nil, errors.New("synthetic fallback route requires root and a utun")
 	}
-	if !prefix.Addr().Is4() || prefix != prefix.Masked() || (prefix.Bits() != 24 && prefix.Bits() != 32) || !(syntheticPrecedencePrefix.Contains(prefix.Addr()) || syntheticIPv4Prefix.Contains(prefix.Addr())) {
+	if !prefix.Addr().Is4() || prefix != prefix.Masked() || prefix.Bits() < 2 || (synthetic && ((prefix.Bits() != 24 && prefix.Bits() != 32) || !(syntheticPrecedencePrefix.Contains(prefix.Addr()) || syntheticIPv4Prefix.Contains(prefix.Addr())))) {
 		return nil, errors.New("synthetic split route must be a canonical TEST-NET /24 or /32")
 	}
 	iface, err := net.InterfaceByName(process.name)

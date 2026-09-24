@@ -22,8 +22,34 @@ var syntheticPhysicalProbe = netip.MustParseAddr("203.0.113.254")
 type PhysicalEndpointRoute struct {
 	target, gateway netip.Addr
 	prefix          netip.Prefix
+	basePrefix      netip.Prefix
 	iface           *net.Interface
 	routeSet        bool
+}
+
+// configurePlannedPhysicalEndpointRoute records the endpoint's pre-existing
+// physical route and proves it remains in the RIB after installing the owned host route.
+func configurePlannedPhysicalEndpointRoute(target netip.Addr) (*PhysicalEndpointRoute, error) {
+	if os.Geteuid() != 0 || !target.Is4() || !target.IsGlobalUnicast() {
+		return nil, errors.New("planned endpoint route requires IPv4 root")
+	}
+	configured := &PhysicalEndpointRoute{target: target}
+	existing, err := configured.lookup()
+	if err != nil || existing.Err != nil || configured.isTargetHostRoute(existing) {
+		return nil, errors.Join(err, existing.Err)
+	}
+	configured.basePrefix, _ = routePrefix(existing)
+	configured.gateway, configured.iface, err = physicalGateway(existing)
+	if err != nil || !configured.basePrefix.IsValid() {
+		return nil, errors.Join(err, errors.New("effective endpoint route unavailable"))
+	}
+	if err := configured.add(); err != nil {
+		return configured.cleanupFailedRouteAdd(err)
+	}
+	if err := configured.verify(); err != nil || !configured.baseRouteInRIB() {
+		return configured.cleanupFailedRouteAdd(errors.Join(err, errors.New("effective endpoint route changed")))
+	}
+	return configured, nil
 }
 
 func configureSyntheticPhysicalEndpointRoute(targetText string) (*PhysicalEndpointRoute, error) {
@@ -199,6 +225,29 @@ func (configured *PhysicalEndpointRoute) validatePhysicalGateway() error {
 
 func (configured *PhysicalEndpointRoute) matchesPhysicalGateway(gateway netip.Addr, iface *net.Interface) bool {
 	return iface != nil && gateway == configured.gateway && iface.Index == configured.iface.Index && iface.Name == configured.iface.Name
+}
+
+func (configured *PhysicalEndpointRoute) baseRouteInRIB() bool {
+	rib, err := route.FetchRIB(syscall.AF_INET, route.RIBTypeRoute, 0)
+	if err != nil {
+		return false
+	}
+	messages, err := route.ParseRIB(route.RIBTypeRoute, rib)
+	if err != nil {
+		return false
+	}
+	for _, parsed := range messages {
+		message, ok := parsed.(*route.RouteMessage)
+		if !ok {
+			continue
+		}
+		prefix, ok := routePrefix(message)
+		gateway, gatewayOK := routeAddress(message, syscall.RTAX_GATEWAY).(*route.Inet4Addr)
+		if ok && gatewayOK && prefix == configured.basePrefix && message.Index == configured.iface.Index && gateway.IP == configured.gateway.As4() {
+			return true
+		}
+	}
+	return false
 }
 
 func (configured *PhysicalEndpointRoute) routeAddrs() []route.Addr {
