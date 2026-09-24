@@ -84,10 +84,14 @@ func (configured *SyntheticFallbackRoute) hasForeignMoreSpecificRoute() bool {
 	if err != nil {
 		return true
 	}
+	return hasForeignMoreSpecificRoute(messages, configured.prefix, netip.Prefix{})
+}
+
+func hasForeignMoreSpecificRoute(messages []route.Message, planned, ownEndpoint netip.Prefix) bool {
 	for _, parsed := range messages {
 		message, ok := parsed.(*route.RouteMessage)
 		prefix, ok := routePrefix(message)
-		if ok && message.Flags&syscall.RTF_UP != 0 && configured.prefix.Contains(prefix.Addr()) && prefix.Bits() > configured.prefix.Bits() {
+		if ok && prefix != ownEndpoint && message.Flags&syscall.RTF_UP != 0 && planned.Contains(prefix.Addr()) && prefix.Bits() > planned.Bits() {
 			return true
 		}
 	}

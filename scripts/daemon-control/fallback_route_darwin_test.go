@@ -13,6 +13,17 @@ import (
 	"golang.org/x/net/route"
 )
 
+func TestPlannedSplitRejectsForeignMoreSpecificRIBRoute(t *testing.T) {
+	planned := netip.MustParsePrefix("198.51.100.0/24")
+	foreign := fallbackRouteMessage(8, syscall.RTF_UP, [4]byte{198, 51, 100, 200}, [4]byte{255, 255, 255, 255}, "utun8")
+	if !hasForeignMoreSpecificRoute([]route.Message{foreign}, planned, netip.Prefix{}) {
+		t.Fatal("accepted foreign shadow away from probe")
+	}
+	if hasForeignMoreSpecificRoute([]route.Message{foreign}, planned, netip.MustParsePrefix("198.51.100.200/32")) {
+		t.Fatal("rejected owned endpoint exception")
+	}
+}
+
 func TestSyntheticFallbackRouteOwnership(t *testing.T) {
 	configured := &SyntheticFallbackRoute{
 		name:   "utun7",
