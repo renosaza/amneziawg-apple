@@ -64,6 +64,8 @@ xcodebuild -project "$root/WireGuard.xcodeproj" \
     CODE_SIGNING_REQUIRED=NO \
     SPARKLE_FEED_URL="$sparkle_feed_url" \
     SPARKLE_PUBLIC_ED_KEY="$sparkle_public_ed_key" \
+    INFOPLIST_KEY_SUFeedURL="$sparkle_feed_url" \
+    INFOPLIST_KEY_SUPublicEDKey="$sparkle_public_ed_key" \
     build
 
 app_source="$build_products/$configuration/AmneziaWG.app"
