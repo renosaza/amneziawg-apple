@@ -58,6 +58,26 @@ func TestManualRoutePlanStartAndCleanup(t *testing.T) {
 	if err := process.precedenceEndpointRoute.verify(); err != nil {
 		t.Fatal(err)
 	}
+	failedFrame, err := json.Marshal(request{Version: 1, Operation: "start", ProfileID: profileIDTwo, Config: config, RoutePlan: json.RawMessage(plan)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := exchange(t, server, 501, requestFrame(t, string(failedFrame)))
+	if failed.OK || failed.Error != "start_failed" {
+		t.Fatalf("route-plan collision start: %#v", failed)
+	}
+	if _, found := server.profiles[profileIDTwo]; found {
+		t.Fatal("failed route-plan start retained a session")
+	}
+	if err := process.route.requireOwnedAddress(); err != nil {
+		t.Fatal(err)
+	}
+	if err := process.fallbackRoute.verify(); err != nil {
+		t.Fatal(err)
+	}
+	if err := process.precedenceEndpointRoute.verify(); err != nil {
+		t.Fatal(err)
+	}
 	if stopped := server.apply(request{Operation: "stop", ProfileID: profileID}); !stopped.OK {
 		t.Fatalf("route-plan stop: %#v", stopped)
 	}
