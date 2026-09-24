@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"syscall"
 	"time"
@@ -23,6 +24,8 @@ import (
 const maxFrameBytes = 4 * 1024
 
 const manualRoutePlanProfileID = "11111111-2222-4333-8444-555555555555"
+const manualRoutePlanProfileIDTwo = "22222222-3333-4444-8555-666666666666"
+const manualRoutePlanProfileIDThree = "33333333-4444-4555-8666-777777777777"
 
 var manualRoutePlanRequest = struct {
 	Version   int             `json:"version"`
@@ -40,6 +43,38 @@ var manualRoutePlanRequest = struct {
 	RoutePlan: json.RawMessage(`{"local_address":"192.0.2.2/32","routes":[{"destination":"198.51.100.0/24","owner":"tunnel"},{"destination":"198.51.100.10/32","owner":"physicalEndpoint"}]}`),
 }
 
+var manualRoutePlanRequestTwo = struct {
+	Version   int             `json:"version"`
+	Operation string          `json:"operation"`
+	ProfileID string          `json:"profile_id"`
+	Config    string          `json:"config,omitempty"`
+	RoutePlan json.RawMessage `json:"route_plan,omitempty"`
+}{
+	Version:   1,
+	Operation: "start",
+	ProfileID: manualRoutePlanProfileIDTwo,
+	Config: "private_key=3333333333333333333333333333333333333333333333333333333333333333\n" +
+		"public_key=4444444444444444444444444444444444444444444444444444444444444444\n" +
+		"allowed_ip=203.0.113.0/24\nendpoint=203.0.113.10:1",
+	RoutePlan: json.RawMessage(`{"local_address":"192.0.2.3/32","routes":[{"destination":"203.0.113.0/24","owner":"tunnel"},{"destination":"203.0.113.10/32","owner":"physicalEndpoint"}]}`),
+}
+
+var manualRoutePlanRequestThree = struct {
+	Version   int             `json:"version"`
+	Operation string          `json:"operation"`
+	ProfileID string          `json:"profile_id"`
+	Config    string          `json:"config,omitempty"`
+	RoutePlan json.RawMessage `json:"route_plan,omitempty"`
+}{
+	Version:   1,
+	Operation: "start",
+	ProfileID: manualRoutePlanProfileIDThree,
+	Config: "private_key=5555555555555555555555555555555555555555555555555555555555555555\n" +
+		"public_key=6666666666666666666666666666666666666666666666666666666666666666\n" +
+		"allowed_ip=192.0.2.128/25\nendpoint=192.0.2.250:1",
+	RoutePlan: json.RawMessage(`{"local_address":"192.0.2.4/32","routes":[{"destination":"192.0.2.128/25","owner":"tunnel"},{"destination":"192.0.2.250/32","owner":"physicalEndpoint"}]}`),
+}
+
 func main() {
 	socket := flag.String("socket", "", "root-owned directory socket path")
 	uidText := flag.String("uid", "", "authorized non-root macOS UID")
@@ -49,14 +84,19 @@ func main() {
 	prepareStop := flag.Bool("prepare-stop", false, "atomically refuse new sessions when the daemon is idle")
 	manualRoutePlanStart := flag.Bool("manual-route-plan-start", false, "send the fixed synthetic route-plan start request")
 	manualRoutePlanStop := flag.Bool("manual-route-plan-stop", false, "stop the fixed synthetic route-plan session")
+	manualRoutePlanStartTwo := flag.Bool("manual-route-plan-start-two", false, "send the second fixed synthetic route-plan start request")
+	manualRoutePlanStopTwo := flag.Bool("manual-route-plan-stop-two", false, "stop the second fixed synthetic route-plan session")
+	manualRoutePlanStartThree := flag.Bool("manual-route-plan-start-three", false, "send the third fixed synthetic route-plan start request")
+	manualRoutePlanStopThree := flag.Bool("manual-route-plan-stop-three", false, "stop the third fixed synthetic route-plan session")
+	manualRoutePlanAssertOneThree := flag.Bool("manual-route-plan-assert-one-three", false, "assert only the first and third fixed synthetic route-plan sessions are running")
 	flag.Parse()
-	if *checkIdle || *prepareStop || *manualRoutePlanStart || *manualRoutePlanStop {
+	if *checkIdle || *prepareStop || *manualRoutePlanStart || *manualRoutePlanStop || *manualRoutePlanStartTwo || *manualRoutePlanStopTwo || *manualRoutePlanStartThree || *manualRoutePlanStopThree || *manualRoutePlanAssertOneThree {
 		if flag.NArg() != 0 || *socket == "" || *uidText != "" || *binaryPath != "" {
-			fmt.Fprintln(os.Stderr, "usage: daemon-control-poc -check-idle|-prepare-stop|-manual-route-plan-start|-manual-route-plan-stop -socket /var/run/name.sock")
+			fmt.Fprintln(os.Stderr, "usage: daemon-control-poc -check-idle|-prepare-stop|-manual-route-plan-start|-manual-route-plan-stop|-manual-route-plan-start-two|-manual-route-plan-stop-two|-manual-route-plan-start-three|-manual-route-plan-stop-three|-manual-route-plan-assert-one-three -socket /var/run/name.sock")
 			os.Exit(2)
 		}
 		operations := 0
-		for _, selected := range []bool{*checkIdle, *prepareStop, *manualRoutePlanStart, *manualRoutePlanStop} {
+		for _, selected := range []bool{*checkIdle, *prepareStop, *manualRoutePlanStart, *manualRoutePlanStop, *manualRoutePlanStartTwo, *manualRoutePlanStopTwo, *manualRoutePlanStartThree, *manualRoutePlanStopThree, *manualRoutePlanAssertOneThree} {
 			if selected {
 				operations++
 			}
@@ -74,6 +114,41 @@ func main() {
 		}
 		if *manualRoutePlanStop {
 			if err := daemonManualRoutePlanStop(*socket); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
+		}
+		if *manualRoutePlanStartTwo {
+			if err := daemonManualRoutePlanStartTwo(*socket); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
+		}
+		if *manualRoutePlanStopTwo {
+			if err := daemonManualRoutePlanStopTwo(*socket); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
+		}
+		if *manualRoutePlanStartThree {
+			if err := daemonManualRoutePlanStartThree(*socket); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
+		}
+		if *manualRoutePlanStopThree {
+			if err := daemonManualRoutePlanStopThree(*socket); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
+		}
+		if *manualRoutePlanAssertOneThree {
+			if err := daemonManualRoutePlanAssertProfiles(*socket, manualRoutePlanProfileID, manualRoutePlanProfileIDThree); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(1)
 			}
@@ -154,17 +229,69 @@ type listResponse struct {
 }
 
 func daemonManualRoutePlanStart(socket string) error {
+	return daemonManualRoutePlanStartRequest(socket, manualRoutePlanRequest)
+}
+
+func daemonManualRoutePlanStop(socket string) error {
+	return daemonManualRoutePlanStopRequest(socket, manualRoutePlanProfileID)
+}
+
+func daemonManualRoutePlanStartTwo(socket string) error {
+	return daemonManualRoutePlanStartRequest(socket, manualRoutePlanRequestTwo)
+}
+
+func daemonManualRoutePlanStopTwo(socket string) error {
+	return daemonManualRoutePlanStopRequest(socket, manualRoutePlanProfileIDTwo)
+}
+
+func daemonManualRoutePlanStartThree(socket string) error {
+	return daemonManualRoutePlanStartRequest(socket, manualRoutePlanRequestThree)
+}
+
+func daemonManualRoutePlanStopThree(socket string) error {
+	return daemonManualRoutePlanStopRequest(socket, manualRoutePlanProfileIDThree)
+}
+
+func daemonManualRoutePlanAssertProfiles(socket string, expected ...string) error {
 	if err := daemonHello(socket); err != nil {
 		return err
 	}
-	response, err := daemonExchange(socket, manualRoutePlanRequest)
-	if err != nil || response.Profile == nil || response.Profile.ID != manualRoutePlanProfileID || response.Profile.Status != "running" {
+	response, err := daemonRequest(socket, "list")
+	if err != nil || len(response.Profiles) != len(expected) {
+		return errors.New("daemon synthetic route-plan session set changed")
+	}
+	actual := make([]string, 0, len(response.Profiles))
+	for _, profile := range response.Profiles {
+		actual = append(actual, profile.ID)
+	}
+	sort.Strings(actual)
+	sort.Strings(expected)
+	for index := range expected {
+		if actual[index] != expected[index] {
+			return errors.New("daemon synthetic route-plan session set changed")
+		}
+	}
+	return nil
+}
+
+func daemonManualRoutePlanStartRequest(socket string, request struct {
+	Version   int             `json:"version"`
+	Operation string          `json:"operation"`
+	ProfileID string          `json:"profile_id"`
+	Config    string          `json:"config,omitempty"`
+	RoutePlan json.RawMessage `json:"route_plan,omitempty"`
+}) error {
+	if err := daemonHello(socket); err != nil {
+		return err
+	}
+	response, err := daemonExchange(socket, request)
+	if err != nil || response.Profile == nil || response.Profile.ID != request.ProfileID || response.Profile.Status != "running" {
 		return errors.New("daemon synthetic route-plan start failed")
 	}
 	return nil
 }
 
-func daemonManualRoutePlanStop(socket string) error {
+func daemonManualRoutePlanStopRequest(socket, profileID string) error {
 	if err := daemonHello(socket); err != nil {
 		return err
 	}
@@ -172,8 +299,8 @@ func daemonManualRoutePlanStop(socket string) error {
 		Version   int    `json:"version"`
 		Operation string `json:"operation"`
 		ProfileID string `json:"profile_id"`
-	}{Version: 1, Operation: "stop", ProfileID: manualRoutePlanProfileID})
-	if err != nil || response.Profile == nil || response.Profile.ID != manualRoutePlanProfileID || response.Profile.Status != "stopped" {
+	}{Version: 1, Operation: "stop", ProfileID: profileID})
+	if err != nil || response.Profile == nil || response.Profile.ID != profileID || response.Profile.Status != "stopped" {
 		return errors.New("daemon synthetic route-plan stop failed")
 	}
 	return nil
