@@ -5,6 +5,7 @@
 package daemoncontrol
 
 import (
+	"encoding/json"
 	"os"
 	"testing"
 )
@@ -18,7 +19,57 @@ func newTunnelBackendForManualRuntime(binary string) (Backend, error) {
 	configured.syntheticIPv4Routes = true
 	configured.syntheticEndpointRoutes = true
 	configured.syntheticFallbackRoute = true
+	configured.allowRoutePlanRuntime = true
 	return backend, nil
+}
+
+func TestManualRoutePlanStartAndCleanup(t *testing.T) {
+	if os.Getenv("AMNEZIAWG_DAEMON_RUNTIME") != "1" {
+		t.Skip("manual disposable-runner test")
+	}
+	backend, err := newTunnelBackendForManualRuntime(os.Getenv("AMNEZIAWG_DAEMON_BINARY"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := NewServerWithBackend(501, backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const config = "private_key=1111111111111111111111111111111111111111111111111111111111111111\nallowed_ip=198.51.100.0/24\nendpoint=198.51.100.10:1"
+	const plan = `{"local_address":"192.0.2.2/32","routes":[{"destination":"198.51.100.0/24","owner":"tunnel"},{"destination":"198.51.100.10/32","owner":"physicalEndpoint"}]}`
+	frame, err := json.Marshal(request{Version: 1, Operation: "start", ProfileID: profileID, Config: config, RoutePlan: json.RawMessage(plan)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := exchange(t, server, 501, requestFrame(t, string(frame)))
+	if !started.OK {
+		t.Fatalf("route-plan start: %#v", started)
+	}
+	process := server.profiles[profileID].value.(*tunnelProcess)
+	if process.route == nil || process.fallbackRoute == nil || process.precedenceEndpointRoute == nil {
+		t.Fatal("route plan did not own synthetic resources")
+	}
+	if err := process.route.requireOwnedAddress(); err != nil {
+		t.Fatal(err)
+	}
+	if err := process.fallbackRoute.verify(); err != nil {
+		t.Fatal(err)
+	}
+	if err := process.precedenceEndpointRoute.verify(); err != nil {
+		t.Fatal(err)
+	}
+	if stopped := server.apply(request{Operation: "stop", ProfileID: profileID}); !stopped.OK {
+		t.Fatalf("route-plan stop: %#v", stopped)
+	}
+	if err := process.route.proveAbsentAfterTunnelExit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := process.fallbackRoute.proveAbsentAfterTunnelExit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := process.precedenceEndpointRoute.proveAbsent(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestManualSyntheticThreeTunnelLifecycle(t *testing.T) {

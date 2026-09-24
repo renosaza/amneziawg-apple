@@ -106,7 +106,7 @@ func (backend *tunnelBackend) StartWithRoutePlan(config string, plan routePlan) 
 }
 
 func isManualRoutePlan(plan routePlan) bool {
-	if plan.LocalAddress != "192.0.2.1/32" {
+	if plan.LocalAddress != "192.0.2.2/32" {
 		return false
 	}
 	var routes []routePlanRoute
