@@ -17,6 +17,7 @@
 - [Decision 0013](architecture/decisions/0013-free-macos-stock-gui-readonly.md): unsigned stock-Manager profile-management experiment.
 - [Decision 0016](architecture/decisions/0016-real-single-split-poc-limit.md): synthetic native route-plan POC limit.
 - [Decision 0017](architecture/decisions/0017-free-macos-daemon-single-split-activation.md): unsigned Manager single-IPv4-split activation boundary.
+- [Decision 0018](architecture/decisions/0018-free-macos-daemon-multiple-split-sessions.md): experimental daemon ownership checks for multiple disjoint IPv4 split sessions.
 - [Building](BUILDING.md): local macOS build and signing prerequisites.
 - [Local development](guides/local-development.md): verified development checks.
 - [Troubleshooting](guides/troubleshooting.md): verified local toolchain limitation.

@@ -35,6 +35,11 @@ func TestManualRoutePlanStartAndCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := server.Close(); err != nil {
+			t.Errorf("cleanup failed: %v", err)
+		}
+	})
 	const config = "private_key=1111111111111111111111111111111111111111111111111111111111111111\npublic_key=2222222222222222222222222222222222222222222222222222222222222222\nallowed_ip=198.51.100.0/24\nendpoint=198.51.100.10:1"
 	const plan = `{"local_address":"192.0.2.2/32","routes":[{"destination":"198.51.100.0/24","owner":"tunnel"},{"destination":"198.51.100.10/32","owner":"physicalEndpoint"}]}`
 	frame, err := json.Marshal(request{Version: 1, Operation: "start", ProfileID: profileID, Config: config, RoutePlan: json.RawMessage(plan)})
@@ -59,15 +64,38 @@ func TestManualRoutePlanStartAndCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	addressRoute, splitRoute, endpointRoute := process.route, process.fallbackRoute, process.precedenceEndpointRoute
-	failedFrame, err := json.Marshal(request{Version: 1, Operation: "start", ProfileID: profileIDTwo, Config: config, RoutePlan: json.RawMessage(plan)})
+	const configTwo = "private_key=3333333333333333333333333333333333333333333333333333333333333333\npublic_key=4444444444444444444444444444444444444444444444444444444444444444\nallowed_ip=203.0.113.0/24\nendpoint=203.0.113.10:1"
+	const planTwo = `{"local_address":"192.0.2.3/32","routes":[{"destination":"203.0.113.0/24","owner":"tunnel"},{"destination":"203.0.113.10/32","owner":"physicalEndpoint"}]}`
+	secondFrame, err := json.Marshal(request{Version: 1, Operation: "start", ProfileID: profileIDTwo, Config: configTwo, RoutePlan: json.RawMessage(planTwo)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondStarted := exchange(t, server, 501, requestFrame(t, string(secondFrame)))
+	if !secondStarted.OK {
+		t.Fatalf("second route-plan start stage=%s: %#v", backend.(*tunnelBackend).lastStartStage, secondStarted)
+	}
+	second := server.profiles[profileIDTwo].value.(*tunnelProcess)
+	if second.route == nil || second.fallbackRoute == nil || second.precedenceEndpointRoute == nil {
+		t.Fatal("second route plan did not own synthetic resources")
+	}
+	if err := second.route.requireOwnedAddress(); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.fallbackRoute.verify(); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.precedenceEndpointRoute.verify(); err != nil {
+		t.Fatal(err)
+	}
+	failedFrame, err := json.Marshal(request{Version: 1, Operation: "start", ProfileID: profileIDThree, Config: config, RoutePlan: json.RawMessage(plan)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	failed := exchange(t, server, 501, requestFrame(t, string(failedFrame)))
-	if failed.OK || failed.Error != "planned_session_active" {
+	if failed.OK || failed.Error != "planned_local_address_conflict" {
 		t.Fatalf("route-plan collision start: %#v", failed)
 	}
-	if _, found := server.profiles[profileIDTwo]; found {
+	if _, found := server.profiles[profileIDThree]; found {
 		t.Fatal("failed route-plan start retained a session")
 	}
 	if err := process.route.requireOwnedAddress(); err != nil {
@@ -90,6 +118,21 @@ func TestManualRoutePlanStartAndCleanup(t *testing.T) {
 	}
 	if err := endpointRoute.proveAbsent(); err != nil {
 		t.Fatal(err)
+	}
+	if status := server.apply(request{Operation: "status", ProfileID: profileIDTwo}); !status.OK {
+		t.Fatalf("second route-plan session changed after first stop: %#v", status)
+	}
+	if err := second.route.requireOwnedAddress(); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.fallbackRoute.verify(); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.precedenceEndpointRoute.verify(); err != nil {
+		t.Fatal(err)
+	}
+	if stopped := server.apply(request{Operation: "stop", ProfileID: profileIDTwo}); !stopped.OK {
+		t.Fatalf("second route-plan stop: %#v", stopped)
 	}
 }
 

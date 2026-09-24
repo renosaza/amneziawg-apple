@@ -19,6 +19,15 @@ func (backend *partialRoutePlanBackend) StartWithRoutePlan(string, routePlan) (S
 	return Session{value: backend.starts}, errors.New("synthetic partial start")
 }
 
+type plannedFakeBackend struct{ fakeBackend }
+
+func (backend *plannedFakeBackend) StartWithRoutePlan(string, routePlan) (Session, error) {
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	backend.starts++
+	return Session{value: backend.starts}, nil
+}
+
 func TestRoutePlanStartIsValidatedBeforeBackendStart(t *testing.T) {
 	backend := &fakeBackend{}
 	server, err := NewServerWithBackend(501, backend)
@@ -45,7 +54,7 @@ func TestRoutePlanStartIsValidatedBeforeBackendStart(t *testing.T) {
 	}
 }
 
-func TestRoutePlanPartialStartRetainsSingletonReservation(t *testing.T) {
+func TestRoutePlanPartialStartRetainsReservation(t *testing.T) {
 	backend := &partialRoutePlanBackend{}
 	server, err := NewServerWithBackend(501, backend)
 	if err != nil {
@@ -53,23 +62,133 @@ func TestRoutePlanPartialStartRetainsSingletonReservation(t *testing.T) {
 	}
 	const config = "private_key=synthetic\npublic_key=peer\nallowed_ip=192.0.2.0/24\nendpoint=192.0.2.10:51820"
 	const plan = `{"local_address":"192.0.2.2/32","routes":[{"destination":"192.0.2.0/24","owner":"tunnel"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"}]}`
-	for _, id := range []string{profileID, profileIDTwo} {
-		response := exchange(t, server, 501, requestFrame(t, fmt.Sprintf(
-			`{"version":1,"operation":"start","profile_id":"%s","config":%q,"route_plan":%s}`,
-			id, config, plan,
-		)))
-		if id == profileID && response.Error != "start_failed" {
-			t.Fatalf("partial start: %#v", response)
-		}
-		if id == profileIDTwo && response.Error != "planned_session_active" {
-			t.Fatalf("second planned start: %#v", response)
-		}
+	response := exchange(t, server, 501, requestFrame(t, fmt.Sprintf(
+		`{"version":1,"operation":"start","profile_id":"%s","config":%q,"route_plan":%s}`,
+		profileID, config, plan,
+	)))
+	if response.Error != "start_failed" {
+		t.Fatalf("partial start: %#v", response)
+	}
+	response = exchange(t, server, 501, requestFrame(t, fmt.Sprintf(
+		`{"version":1,"operation":"start","profile_id":"%s","config":%q,"route_plan":%s}`,
+		profileIDTwo, config, plan,
+	)))
+	if response.Error != "planned_local_address_conflict" {
+		t.Fatalf("second planned start: %#v", response)
 	}
 	if starts, _ := backend.counts(); starts != 1 {
 		t.Fatalf("starts=%d", starts)
 	}
 	if response := server.apply(request{Operation: "stop", ProfileID: profileID}); !response.OK {
 		t.Fatalf("cleanup partial start: %#v", response)
+	}
+}
+
+func TestRoutePlanReservationsAllowDistinctSplits(t *testing.T) {
+	backend := &plannedFakeBackend{}
+	server, err := NewServerWithBackend(501, backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles := []struct {
+		id, config, plan string
+	}{
+		{profileID, "private_key=synthetic\npublic_key=peer-one\nallowed_ip=10.25.0.0/24\nendpoint=192.0.2.10:51820", `{"local_address":"10.25.0.2/32","routes":[{"destination":"10.25.0.0/24","owner":"tunnel"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"}]}`},
+		{profileIDTwo, "private_key=synthetic\npublic_key=peer-two\nallowed_ip=10.1.1.2/32\nendpoint=198.51.100.10:51820", `{"local_address":"10.1.1.1/32","routes":[{"destination":"10.1.1.2/32","owner":"tunnel"},{"destination":"198.51.100.10/32","owner":"physicalEndpoint"}]}`},
+		{profileIDThree, "private_key=synthetic\npublic_key=peer-three\nallowed_ip=10.2.2.2/32\nendpoint=203.0.113.10:51820", `{"local_address":"10.2.2.1/32","routes":[{"destination":"10.2.2.2/32","owner":"tunnel"},{"destination":"203.0.113.10/32","owner":"physicalEndpoint"}]}`},
+	}
+	for _, profile := range profiles {
+		response := exchange(t, server, 501, requestFrame(t, fmt.Sprintf(
+			`{"version":1,"operation":"start","profile_id":"%s","config":%q,"route_plan":%s}`,
+			profile.id, profile.config, profile.plan,
+		)))
+		if !response.OK {
+			t.Fatalf("start %s: %#v", profile.id, response)
+		}
+	}
+	if starts, _ := backend.counts(); starts != len(profiles) || len(server.planned) != len(profiles) {
+		t.Fatalf("starts=%d planned=%d", starts, len(server.planned))
+	}
+	if stopped := server.apply(request{Operation: "stop", ProfileID: profileID}); !stopped.OK || len(server.planned) != len(profiles)-1 {
+		t.Fatalf("stop first profile: %#v planned=%d", stopped, len(server.planned))
+	}
+	for _, id := range []string{profileIDTwo, profileIDThree} {
+		if status := server.apply(request{Operation: "status", ProfileID: id}); !status.OK {
+			t.Fatalf("remaining profile %s changed: %#v", id, status)
+		}
+	}
+}
+
+func TestRoutePlanReservationsRejectConflictsAndLegacyMixing(t *testing.T) {
+	backend := &plannedFakeBackend{}
+	server, err := NewServerWithBackend(501, backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const config = "private_key=synthetic\npublic_key=peer\nallowed_ip=10.25.0.0/24\nendpoint=192.0.2.10:51820"
+	const plan = `{"local_address":"10.25.0.2/32","routes":[{"destination":"10.25.0.0/24","owner":"tunnel"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"}]}`
+	start := func(id, configuration, routePlan string) response {
+		return exchange(t, server, 501, requestFrame(t, fmt.Sprintf(`{"version":1,"operation":"start","profile_id":"%s","config":%q,"route_plan":%s}`, id, configuration, routePlan)))
+	}
+	if response := start(profileID, config, plan); !response.OK {
+		t.Fatalf("first plan: %#v", response)
+	}
+	for name, candidate := range map[string]string{
+		"overlap":  `{"local_address":"10.1.1.1/32","routes":[{"destination":"10.25.0.0/25","owner":"tunnel"},{"destination":"198.51.100.10/32","owner":"physicalEndpoint"}]}`,
+		"endpoint": `{"local_address":"10.1.1.1/32","routes":[{"destination":"10.1.1.2/32","owner":"tunnel"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"}]}`,
+	} {
+		configuration := "private_key=synthetic\npublic_key=peer\nallowed_ip=10.25.0.0/25\nendpoint=198.51.100.10:51820"
+		if name == "endpoint" {
+			configuration = "private_key=synthetic\npublic_key=peer\nallowed_ip=10.1.1.2/32\nendpoint=192.0.2.10:51820"
+		}
+		response := start(profileIDTwo, configuration, candidate)
+		want := "planned_route_conflict"
+		if name == "endpoint" {
+			want = "planned_endpoint_conflict"
+		}
+		if response.Error != want {
+			t.Fatalf("%s conflict: %#v", name, response)
+		}
+	}
+	if response := exchange(t, server, 501, requestFrame(t, `{"version":1,"operation":"start","profile_id":"`+profileIDTwo+`","config":"private_key=synthetic"}`)); response.Error != "planned_session_active" {
+		t.Fatalf("legacy session mixed with planned: %#v", response)
+	}
+	if stopped := server.apply(request{Operation: "stop", ProfileID: profileID}); !stopped.OK {
+		t.Fatalf("stop planned profile: %#v", stopped)
+	}
+	if response := exchange(t, server, 501, requestFrame(t, `{"version":1,"operation":"start","profile_id":"`+profileID+`","config":"private_key=synthetic"}`)); !response.OK {
+		t.Fatalf("legacy session: %#v", response)
+	}
+	if response := start(profileIDTwo, config, plan); response.Error != "unplanned_session_active" {
+		t.Fatalf("planned session mixed with legacy: %#v", response)
+	}
+}
+
+func TestRoutePlanFailedStopRetainsReservation(t *testing.T) {
+	backend := &plannedFakeBackend{fakeBackend: fakeBackend{stopFailures: 1}}
+	server, err := NewServerWithBackend(501, backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const config = "private_key=synthetic\npublic_key=peer\nallowed_ip=10.25.0.0/24\nendpoint=192.0.2.10:51820"
+	const plan = `{"local_address":"10.25.0.2/32","routes":[{"destination":"10.25.0.0/24","owner":"tunnel"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"}]}`
+	start := func(id string) response {
+		return exchange(t, server, 501, requestFrame(t, fmt.Sprintf(`{"version":1,"operation":"start","profile_id":"%s","config":%q,"route_plan":%s}`, id, config, plan)))
+	}
+	if response := start(profileID); !response.OK {
+		t.Fatalf("start: %#v", response)
+	}
+	if response := server.apply(request{Operation: "stop", ProfileID: profileID}); response.Error != "stop_failed" {
+		t.Fatalf("failed stop: %#v", response)
+	}
+	if response := start(profileIDTwo); response.Error != "planned_local_address_conflict" {
+		t.Fatalf("failed stop released plan: %#v", response)
+	}
+	if response := server.apply(request{Operation: "stop", ProfileID: profileID}); !response.OK {
+		t.Fatalf("retry stop: %#v", response)
+	}
+	if response := start(profileIDTwo); !response.OK {
+		t.Fatalf("released plan after confirmed stop: %#v", response)
 	}
 }
 

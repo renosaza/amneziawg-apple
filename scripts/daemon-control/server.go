@@ -54,6 +54,14 @@ type routePlanRoute struct {
 	Owner       string `json:"owner"`
 }
 
+// routePlanReservation contains only the non-secret address ownership needed
+// to keep concurrently starting route-plan sessions disjoint.
+type routePlanReservation struct {
+	local    netip.Addr
+	tunnel   netip.Prefix
+	endpoint netip.Addr
+}
+
 type Profile struct {
 	ID     string `json:"id"`
 	Status string `json:"status"`
@@ -75,7 +83,7 @@ type Server struct {
 	backend     Backend
 	connections chan struct{}
 	closed      bool
-	plannedID   string
+	planned     map[string]routePlanReservation
 	closeMu     sync.Mutex
 }
 
@@ -95,6 +103,7 @@ func NewServerWithBackend(allowedUID uint32, backend Backend) (*Server, error) {
 		profiles:    make(map[string]Session),
 		backend:     backend,
 		connections: make(chan struct{}, maxConnections),
+		planned:     make(map[string]routePlanReservation),
 	}, nil
 }
 
@@ -161,21 +170,32 @@ func (server *Server) apply(request request) response {
 		if len(server.profiles) == maxProfiles {
 			return response{Error: "capacity"}
 		}
-		if request.RoutePlan != nil && server.plannedID != "" {
-			return response{Error: "planned_session_active"}
-		}
 		if err := validRoutePlanMatchesConfig(request.RoutePlan, request.Config); err != nil {
 			return response{Error: "invalid_request"}
 		}
+		var reservation routePlanReservation
 		if request.RoutePlan != nil {
-			server.plannedID = request.ProfileID
+			var err error
+			reservation, err = routePlanReservationFor(request.RoutePlan)
+			if err != nil {
+				return response{Error: "invalid_request"}
+			}
+			if len(server.profiles) != len(server.planned) {
+				return response{Error: "unplanned_session_active"}
+			}
+			if conflict := server.plannedConflict(reservation); conflict != "" {
+				return response{Error: conflict}
+			}
+			server.planned[request.ProfileID] = reservation
+		} else if len(server.planned) != 0 {
+			return response{Error: "planned_session_active"}
 		}
 		session, err := server.start(request)
 		if err != nil {
 			if session.value != nil {
 				server.profiles[request.ProfileID] = session
 			} else if request.RoutePlan != nil {
-				server.plannedID = ""
+				delete(server.planned, request.ProfileID)
 			}
 			return response{Error: "start_failed"}
 		}
@@ -190,9 +210,7 @@ func (server *Server) apply(request request) response {
 			return response{Error: "stop_failed"}
 		}
 		delete(server.profiles, request.ProfileID)
-		if server.plannedID == request.ProfileID {
-			server.plannedID = ""
-		}
+		delete(server.planned, request.ProfileID)
 		return response{OK: true, Profile: &Profile{ID: request.ProfileID, Status: "stopped"}}
 	case "status":
 		session, found := server.profiles[request.ProfileID]
@@ -242,9 +260,56 @@ func (server *Server) Close() error {
 		}
 		server.mu.Lock()
 		delete(server.profiles, id)
+		delete(server.planned, id)
 		server.mu.Unlock()
 	}
 	return errors.Join(problems...)
+}
+
+func (server *Server) plannedConflict(candidate routePlanReservation) string {
+	for _, existing := range server.planned {
+		if candidate.local == existing.local {
+			return "planned_local_address_conflict"
+		}
+		if candidate.tunnel.Overlaps(existing.tunnel) {
+			return "planned_route_conflict"
+		}
+		if candidate.endpoint == existing.endpoint {
+			return "planned_endpoint_conflict"
+		}
+	}
+	return ""
+}
+
+func routePlanReservationFor(raw json.RawMessage) (routePlanReservation, error) {
+	var plan routePlan
+	if err := json.Unmarshal(raw, &plan); err != nil {
+		return routePlanReservation{}, errors.New("invalid route plan")
+	}
+	local, err := netip.ParsePrefix(plan.LocalAddress)
+	if err != nil {
+		return routePlanReservation{}, errors.New("invalid route plan")
+	}
+	var routes []routePlanRoute
+	if err := json.Unmarshal(plan.Routes, &routes); err != nil {
+		return routePlanReservation{}, errors.New("invalid route plan")
+	}
+	reservation := routePlanReservation{local: local.Addr()}
+	for _, route := range routes {
+		prefix, err := netip.ParsePrefix(route.Destination)
+		if err != nil {
+			return routePlanReservation{}, errors.New("invalid route plan")
+		}
+		if route.Owner == "tunnel" {
+			reservation.tunnel = prefix
+		} else if route.Owner == "physicalEndpoint" {
+			reservation.endpoint = prefix.Addr()
+		}
+	}
+	if !reservation.local.IsValid() || !reservation.tunnel.IsValid() || !reservation.endpoint.IsValid() {
+		return routePlanReservation{}, errors.New("invalid route plan")
+	}
+	return reservation, nil
 }
 
 func decodeRequest(frame []byte) (request, error) {
