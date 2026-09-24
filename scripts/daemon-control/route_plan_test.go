@@ -73,6 +73,9 @@ func TestRoutePlanMustMatchUAPIBeforeBackendStart(t *testing.T) {
 	const secret = "synthetic-private-key"
 	const config = "private_key=" + secret + "\npublic_key=peer-one\nallowed_ip=10.25.0.0/24\nendpoint=192.0.2.10:51820\npublic_key=peer-two\nallowed_ip=10.1.1.2/32\nendpoint=198.51.100.20:51820\n"
 	const validPlan = `{"routes":[{"destination":"10.25.0.0/24","owner":"tunnel"},{"destination":"10.1.1.2/32","owner":"tunnel"},{"destination":"192.0.2.10/32","owner":"physicalEndpoint"},{"destination":"198.51.100.20/32","owner":"physicalEndpoint"}]}`
+	const tunnelOnlyPlan = `{"routes":[{"destination":"10.25.0.0/24","owner":"tunnel"}]}`
+	const hostnameConfig = "private_key=" + secret + "\nallowed_ip=10.25.0.0/24\nendpoint=vpn.example.test:51820\n"
+	const endpointWithoutRouteConfig = "private_key=" + secret + "\nallowed_ip=10.25.0.0/24\nendpoint=192.0.2.10:51820\n"
 
 	backend := &fakeBackend{}
 	server, err := NewServerWithBackend(501, backend)
@@ -96,7 +99,8 @@ func TestRoutePlanMustMatchUAPIBeforeBackendStart(t *testing.T) {
 	}{
 		{config, strings.Replace(validPlan, "10.25.0.0/24", "10.26.0.0/24", 1)},
 		{config, strings.Replace(validPlan, "198.51.100.20/32", "198.51.100.21/32", 1)},
-		{strings.Replace(config, "198.51.100.20:51820", "vpn.example.test:51820", 1), validPlan},
+		{hostnameConfig, tunnelOnlyPlan},
+		{endpointWithoutRouteConfig, tunnelOnlyPlan},
 	} {
 		id := fmt.Sprintf("aaaaaaaa-2222-4333-8444-%012x", index+1)
 		response := exchange(t, server, 501, requestFrame(t, fmt.Sprintf(

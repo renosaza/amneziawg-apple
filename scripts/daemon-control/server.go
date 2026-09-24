@@ -328,10 +328,6 @@ func validRoutePlanMatchesConfig(raw json.RawMessage, config string) error {
 		return errors.New("invalid route plan")
 	}
 
-	hasPhysicalEndpoint := false
-	for _, route := range routes {
-		hasPhysicalEndpoint = hasPhysicalEndpoint || route.Owner == "physicalEndpoint"
-	}
 	allowedIPs := make([]netip.Prefix, 0)
 	endpoints := make(map[netip.Addr]struct{})
 	for _, line := range strings.Split(config, "\n") {
@@ -346,15 +342,13 @@ func validRoutePlanMatchesConfig(raw json.RawMessage, config string) error {
 		case "endpoint":
 			endpoint, err := netip.ParseAddrPort(value)
 			if err != nil {
-				if hasPhysicalEndpoint {
-					return errors.New("invalid route plan")
-				}
-				continue
+				return errors.New("invalid route plan")
 			}
 			endpoints[endpoint.Addr()] = struct{}{}
 		}
 	}
 
+	physicalEndpoints := make(map[netip.Addr]struct{})
 	for _, route := range routes {
 		prefix, err := netip.ParsePrefix(route.Destination)
 		if err != nil {
@@ -369,6 +363,12 @@ func validRoutePlanMatchesConfig(raw json.RawMessage, config string) error {
 			if _, found := endpoints[prefix.Addr()]; !found {
 				return errors.New("invalid route plan")
 			}
+			physicalEndpoints[prefix.Addr()] = struct{}{}
+		}
+	}
+	for endpoint := range endpoints {
+		if _, found := physicalEndpoints[endpoint]; !found {
+			return errors.New("invalid route plan")
 		}
 	}
 	return nil

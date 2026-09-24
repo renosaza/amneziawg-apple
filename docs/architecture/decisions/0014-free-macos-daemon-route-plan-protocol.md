@@ -21,10 +21,10 @@ UUID and is rejected for every non-`start` operation.
 
 Before it starts a backend child, the daemon also checks only that every
 `tunnel` route is contained by an `allowed_ip` UAPI field and every
-`physicalEndpoint` `/32` matches a literal resolved `endpoint` UAPI field.
-Hostname or mismatched physical endpoints are rejected. It neither stores nor
-forwards the plan, and does not alter a native route, address, DNS, PF state,
-interface, or gateway.
+`physicalEndpoint` `/32` matches a literal resolved `endpoint` UAPI field, and
+vice versa. Hostname or mismatched physical endpoints are rejected. It neither
+stores nor forwards the plan, and does not alter a native route, address, DNS,
+PF state, interface, or gateway.
 
 ## Consequences
 
