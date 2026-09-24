@@ -18,8 +18,11 @@ enum DaemonTunnelState: Equatable {
     }
 
     static func isAuthoritativelyAbsent(
-        profileID: UUID, statuses: [DaemonControlProfileStatus]
+        profileID: UUID,
+        statuses: [DaemonControlProfileStatus],
+        knownProfileIDs: Set<UUID>
     ) -> Bool {
-        !statuses.contains(where: { $0.id == profileID })
+        !statuses.contains(where: { $0.id == profileID }) &&
+            Set(statuses.map(\.id)).isSubset(of: knownProfileIDs)
     }
 }
