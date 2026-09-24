@@ -240,6 +240,11 @@ class TunnelDetailTableViewController: NSViewController {
         }
     }
 
+    @objc func handleStopReassertingAction() {
+        guard tunnel.status == .reasserting else { return }
+        tunnelsManager.startDeactivation(of: tunnel)
+    }
+
     override func viewWillAppear() {
         if tunnel.status == .active {
             startUpdatingRuntimeConfiguration()
@@ -460,10 +465,17 @@ extension TunnelDetailTableViewController: NSTableViewDelegate {
         cell.onButtonClicked = { [weak self] in
             self?.handleToggleActiveStatusAction()
         }
+        cell.secondaryButtonTitle = tr("macToggleStatusButtonDeactivate")
+        cell.isSecondaryButtonHidden = tunnel.status != .reasserting
+        cell.isSecondaryButtonEnabled = true
+        cell.onSecondaryButtonClicked = { [weak self] in
+            self?.handleStopReassertingAction()
+        }
         let changeHandler: (TunnelContainer, Any) -> Void = { [weak cell] tunnel, _ in
             guard let cell = cell else { return }
             cell.buttonTitle = TunnelDetailTableViewController.localizedToggleStatusActionText(for: tunnel)
             cell.isButtonEnabled = (tunnel.hasOnDemandRules || tunnel.status == .active || tunnel.status == .inactive || tunnel.status == .reasserting)
+            cell.isSecondaryButtonHidden = tunnel.status != .reasserting
         }
         cell.statusObservationToken = tunnel.observe(\.status, changeHandler: changeHandler)
         cell.isOnDemandEnabledObservationToken = tunnel.observe(\.isActivateOnDemandEnabled, changeHandler: changeHandler)

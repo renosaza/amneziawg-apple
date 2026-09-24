@@ -5,6 +5,7 @@ script_dir=$(cd "$(dirname "$0")" && pwd)
 repo_dir=$(cd "$script_dir/.." && pwd)
 project="$repo_dir/WireGuard.xcodeproj/project.pbxproj"
 manager="$repo_dir/Sources/WireGuardApp/Tunnel/DaemonTunnelsManager.swift"
+detail_controller="$repo_dir/Sources/WireGuardApp/UI/macOS/ViewController/TunnelDetailTableViewController.swift"
 updater="$repo_dir/Sources/WireGuardApp/UI/macOS/DaemonUpdater.swift"
 developer_config="$repo_dir/Sources/WireGuardApp/Config/Developer.xcconfig.template"
 
@@ -47,6 +48,10 @@ grep -Eq 'store\.delete\(' "$manager"
 grep -Eq 'guard tunnel\.status == \.inactive else' "$manager"
 grep -Eq 'uncertainDaemonProfileIDs\.remove\(profileID\)' "$manager"
 grep -Eq 'DaemonTunnelState\.isAuthoritativelyAbsent' "$manager"
+grep -Fq 'tunnelsManager.refreshStatuses()' "$detail_controller"
+grep -Fq 'func handleStopReassertingAction()' "$detail_controller"
+grep -Fq 'tunnelsManager.startDeactivation(of: tunnel)' "$detail_controller"
+grep -Fq 'cell.isSecondaryButtonHidden = tunnel.status != .reasserting' "$detail_controller"
 
 grep -Fq 'sparkle-project/Sparkle' "$project"
 grep -Fq 'kind = exactVersion' "$project"
