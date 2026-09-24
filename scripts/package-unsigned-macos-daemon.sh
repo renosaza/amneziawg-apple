@@ -98,6 +98,8 @@ with open(path, "rb") as source:
     info = plistlib.load(source)
 info["SUFeedURL"] = os.environ["SPARKLE_FEED_URL"]
 info["SUPublicEDKey"] = os.environ["SPARKLE_PUBLIC_ED_KEY"]
+info["SURequireSignedFeed"] = True
+info["SUVerifyUpdateBeforeExtraction"] = True
 with open(path, "wb") as destination:
     plistlib.dump(info, destination, sort_keys=False)
 PY
