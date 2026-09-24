@@ -23,7 +23,7 @@ fail() {
 usage() {
     cat >&2 <<'EOF_USAGE'
 Usage:
-  sudo scripts/install-daemon-control-poc.sh install --daemon /absolute/daemon-control-poc --amneziawg-go /absolute/amneziawg-go --uid <console-uid>
+  sudo scripts/install-daemon-control-poc.sh install --daemon /absolute/daemon-control-poc --amneziawg-go /absolute/amneziawg-go --uid <console-uid> [--allow-route-plan-runtime]
   sudo scripts/install-daemon-control-poc.sh status  --uid <console-uid>
   sudo scripts/install-daemon-control-poc.sh uninstall --uid <console-uid>
 
@@ -50,11 +50,13 @@ parse_uid() {
 }
 
 parse_sources() {
+	allow_route_plans=false
     while [[ $# -gt 0 ]]; do
         case $1 in
             --daemon) daemon_source=${2:-}; shift 2 ;;
             --amneziawg-go) backend_source=${2:-}; shift 2 ;;
             --uid) parse_uid "${2:-}"; shift 2 ;;
+			--allow-route-plan-runtime) allow_route_plans=true; shift ;;
             *) usage ;;
         esac
     done
@@ -217,6 +219,10 @@ stage_binary() {
 }
 
 write_plist() {
+	local route_plan_argument=
+	if [[ $allow_route_plans == true ]]; then
+		route_plan_argument='<string>-allow-route-plan-runtime</string>'
+	fi
     plist_temp=$(/usr/bin/mktemp "/Library/LaunchDaemons/.${label}.XXXXXX") || fail 'cannot stage launchd plist'
     cat > "$plist_temp" <<EOF_PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -228,6 +234,7 @@ write_plist() {
     <string>-socket</string><string>$socket_path</string>
     <string>-uid</string><string>$allowed_uid</string>
     <string>-binary</string><string>$backend_path</string>
+    $route_plan_argument
   </array>
   <key>RunAtLoad</key><true/>
 </dict></plist>
