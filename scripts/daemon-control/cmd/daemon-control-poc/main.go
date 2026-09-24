@@ -22,7 +22,7 @@ import (
 	"github.com/renosaza/amneziawg-daemon-control-poc"
 )
 
-const maxFrameBytes = 4 * 1024
+const maxFrameBytes = 16 * 1024
 
 const manualRoutePlanProfileID = "11111111-2222-4333-8444-555555555555"
 const manualRoutePlanProfileIDTwo = "22222222-3333-4444-8555-666666666666"
@@ -295,14 +295,14 @@ func manualFullRoutePlan() json.RawMessage {
 }
 
 func manualIPv4TunnelComplement(excluded []netip.Prefix) []netip.Prefix {
-	routes := []netip.Prefix{
-		netip.MustParsePrefix("1.0.0.0/8"), netip.MustParsePrefix("2.0.0.0/7"),
-		netip.MustParsePrefix("4.0.0.0/6"), netip.MustParsePrefix("8.0.0.0/5"),
-		netip.MustParsePrefix("16.0.0.0/4"), netip.MustParsePrefix("32.0.0.0/3"),
-		netip.MustParsePrefix("64.0.0.0/2"), netip.MustParsePrefix("128.0.0.0/2"),
-		netip.MustParsePrefix("192.0.0.0/3"),
-	}
-	for _, exclusion := range excluded {
+	routes := []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}
+	reserved := append([]netip.Prefix{
+		netip.MustParsePrefix("0.0.0.0/8"),
+		netip.MustParsePrefix("127.0.0.0/8"),
+		netip.MustParsePrefix("169.254.0.0/16"),
+		netip.MustParsePrefix("224.0.0.0/3"),
+	}, excluded...)
+	for _, exclusion := range reserved {
 		next := make([]netip.Prefix, 0, len(routes))
 		for _, route := range routes {
 			next = append(next, manualSubtractIPv4Prefix(route, exclusion)...)

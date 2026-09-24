@@ -135,7 +135,7 @@ final class DaemonControlClient {
 
 enum DaemonControlProtocol {
     static let protocolVersion = 1
-    static let maximumFrameBytes = 4 * 1024
+    static let maximumFrameBytes = 16 * 1024
     static let maximumConfigurationBytes = 2 * 1024
     private static let maximumSocketPathBytes = 103
 
