@@ -58,6 +58,7 @@ func TestManualRoutePlanStartAndCleanup(t *testing.T) {
 	if err := process.precedenceEndpointRoute.verify(); err != nil {
 		t.Fatal(err)
 	}
+	addressRoute, splitRoute, endpointRoute := process.route, process.fallbackRoute, process.precedenceEndpointRoute
 	failedFrame, err := json.Marshal(request{Version: 1, Operation: "start", ProfileID: profileIDTwo, Config: config, RoutePlan: json.RawMessage(plan)})
 	if err != nil {
 		t.Fatal(err)
@@ -81,13 +82,13 @@ func TestManualRoutePlanStartAndCleanup(t *testing.T) {
 	if stopped := server.apply(request{Operation: "stop", ProfileID: profileID}); !stopped.OK {
 		t.Fatalf("route-plan stop: %#v", stopped)
 	}
-	if err := process.route.proveAbsentAfterTunnelExit(); err != nil {
+	if err := addressRoute.proveAbsentAfterTunnelExit(); err != nil {
 		t.Fatal(err)
 	}
-	if err := process.fallbackRoute.proveAbsentAfterTunnelExit(); err != nil {
+	if err := splitRoute.proveAbsentAfterTunnelExit(); err != nil {
 		t.Fatal(err)
 	}
-	if err := process.precedenceEndpointRoute.proveAbsent(); err != nil {
+	if err := endpointRoute.proveAbsent(); err != nil {
 		t.Fatal(err)
 	}
 }
