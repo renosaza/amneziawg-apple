@@ -288,7 +288,7 @@ func (backend *tunnelBackend) configureSyntheticFallbackRoute(process *tunnelPro
 		endpointRoute, err := configureSyntheticPrecedenceEndpointRoute(syntheticPrecedenceEndpointTarget)
 		process.precedenceEndpointRoute = endpointRoute
 		if err != nil {
-			return err
+			return fmt.Errorf("split-precedence-endpoint: %w", err)
 		}
 	}
 	route, err := configureSyntheticSplitRoute(process, syntheticSplitPrefixes[process.routeSlot])

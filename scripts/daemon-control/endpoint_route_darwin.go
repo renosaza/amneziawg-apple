@@ -6,6 +6,7 @@ package daemoncontrol
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"os"
@@ -190,12 +191,18 @@ func (configured *PhysicalEndpointRoute) validatePhysicalGateway() error {
 		return err
 	}
 	message, err := requestRouteMessage(syscall.RTM_GET, syscall.RTF_UP|syscall.RTF_HOST, effectiveRouteLookupAddrs(probe))
-	if err != nil || message.Err != nil {
-		return errors.Join(err, message.Err)
+	if err != nil {
+		return fmt.Errorf("effective endpoint probe=%s lookup: %w", probe, err)
+	}
+	if message.Err != nil {
+		return fmt.Errorf("effective endpoint probe=%s lookup errno: %w", probe, message.Err)
 	}
 	gateway, iface, err := physicalGateway(message)
-	if err != nil || !configured.matchesPhysicalGateway(gateway, iface) {
-		return errors.New("effective endpoint gateway changed")
+	if err != nil {
+		return fmt.Errorf("effective endpoint probe=%s: %w", probe, err)
+	}
+	if !configured.matchesPhysicalGateway(gateway, iface) {
+		return fmt.Errorf("effective endpoint probe=%s gateway changed", probe)
 	}
 	return nil
 }
