@@ -45,7 +45,7 @@ To roll back, stop every profile in the GUI, then run:
 sudo ./Daemon/install-daemon-control-poc.sh uninstall --uid "$(id -u)"
 ```
 
-## GUI updates
+## GUI update candidate
 
 The daemon GUI can use Sparkle 2 only when its release build supplies both a
 HTTPS `SUFeedURL` and a base64 EdDSA public key through `SPARKLE_FEED_URL` and
@@ -57,18 +57,43 @@ daemon's `hello` response confirms protocol version 1. If the daemon is absent
 or incompatible, update checks stay disabled; install the matching reviewed
 daemon package manually before using the GUI updater.
 
-Release blocker: `hello` currently proves protocol compatibility only. It does
-not identify a daemon build, so it cannot detect a future same-protocol feature
-drift. Do not configure a public `SUFeedURL` until the release process ties a
-GUI artifact to a reviewed daemon artifact and verifies their compatibility.
+The dispatch-only
+[`Build unsigned macOS daemon release candidate`](../../.github/workflows/unsigned-macos-release.yml)
+workflow builds a signed appcast and both archives for review. It never creates
+a GitHub Release, deploys GitHub Pages content, or updates a root daemon. It
+requires an existing tag whose exact form is
+`v<MARKETING_VERSION>-<CFBundleVersion>`. `CFBundleVersion` is the macOS
+`VERSION_ID_MACOS` from `Sources/WireGuardApp/Config/Version.xcconfig`; increase
+it for every published GUI update.
 
-Generate the EdDSA key once on a trusted release Mac with Sparkle's
-`generate_keys` tool. Put the public value in the release build and retain the
-private value only in that Mac's Keychain or an encrypted GitHub Actions secret.
-Never commit it or put it on a command line. Publish the appcast over HTTPS,
-upload a `ditto -c -k --sequesterRsrc --keepParent` archive to GitHub Releases,
-and sign its enclosure with Sparkle `generate_appcast`. This target requires
-signed feeds and validates an archive before extraction.
+One trusted release Mac must perform this bootstrap once with the Sparkle 2.10.0
+publishing tools:
+
+```sh
+./bin/generate_keys --account com.renosaza.amneziawg.daemon-gui
+./bin/generate_keys --account com.renosaza.amneziawg.daemon-gui -p
+./bin/generate_keys --account com.renosaza.amneziawg.daemon-gui -x /secure/offline/sparkle-ed25519-private-key
+```
+
+Store the printed base64 public key as the repository Actions variable
+`SPARKLE_PUBLIC_ED_KEY`. Put the contents of the exported private-key file in
+the repository Actions secret `SPARKLE_ED25519_PRIVATE_KEY`, then remove the
+temporary exported file from the release Mac using its secure local procedure.
+Keep an offline recovery copy. Neither value belongs in the repository, an
+issue, CI log, profile, or command-line argument.
+
+Create and push the reviewed tag, then dispatch the workflow from that tag and
+inspect its private candidate artifact. The candidate's appcast enclosure uses
+the future GitHub Release URL and is signed by `generate_appcast` through
+standard input only. The workflow never re-signs a downloaded appcast, so an
+untrusted network response cannot enter a signed feed.
+
+Public GitHub Release and GitHub Pages publication remain blocked by
+`C-DAEMON-INSTALL-EXPERIMENT` and
+`C-DAEMON-SINGLE-SPLIT-ACTIVATION-EXPERIMENT`. They need a separately reviewed
+runtime and compatibility gate. Do not edit a signed appcast by hand. Lost or
+rotated Ed25519 keys also require a separately reviewed migration: existing
+ad-hoc clients cannot safely trust a new key through an unsigned feed.
 
 Sparkle replaces only the GUI `.app`. The root installer intentionally does
 not update `/usr/local/libexec` binaries or the LaunchDaemon. A GUI release

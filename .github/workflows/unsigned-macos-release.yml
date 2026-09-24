@@ -1,0 +1,132 @@
+name: Build unsigned macOS daemon release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing signed-off tag in the form v<marketing-version>-<build>
+        required: true
+        type: string
+permissions:
+  contents: read
+
+jobs:
+  release-candidate:
+    if: ${{ github.ref == format('refs/tags/{0}', inputs.tag) }}
+    runs-on: macos-latest
+    env:
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.ref }}
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: Sources/WireGuardKitGo/go.mod
+          cache-dependency-path: Sources/WireGuardKitGo/go.sum
+
+      - name: Verify immutable release input
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(sed -nE 's/^VERSION_NAME = (.+)$/\1/p' Sources/WireGuardApp/Config/Version.xcconfig)
+          build=$(sed -nE 's/^VERSION_ID_MACOS = ([0-9]+)$/\1/p' Sources/WireGuardApp/Config/Version.xcconfig)
+          [[ -n "$version" && "$build" =~ ^[1-9][0-9]*$ ]]
+          [[ "$TAG" == "v${version}-${build}" ]]
+          git diff --quiet
+          git diff --cached --quiet
+          [[ $(git rev-parse "$TAG^{commit}") == "$GITHUB_SHA" ]]
+          git tag --points-at HEAD | grep -Fxq "$TAG"
+
+      - name: Validate Sparkle release configuration
+        shell: bash
+        env:
+          SPARKLE_ED25519_PRIVATE_KEY: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY }}
+          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+        run: |
+          set -euo pipefail
+          [[ -n "$SPARKLE_ED25519_PRIVATE_KEY" ]] || { echo "SPARKLE_ED25519_PRIVATE_KEY is not configured" >&2; exit 1; }
+          SPARKLE_PUBLIC_ED_KEY="$SPARKLE_PUBLIC_ED_KEY" python3 - <<'PY'
+          import base64
+          import os
+
+          try:
+              assert len(base64.b64decode(os.environ["SPARKLE_PUBLIC_ED_KEY"], validate=True)) == 32
+          except (AssertionError, ValueError):
+              raise SystemExit("SPARKLE_PUBLIC_ED_KEY must be a base64 Ed25519 public key")
+          PY
+
+      - name: Prepare unsigned build configuration
+        run: cp Sources/WireGuardApp/Config/Developer.xcconfig.template Sources/WireGuardApp/Config/Developer.xcconfig
+
+      - name: Build and validate release archives
+        shell: bash
+        env:
+          SPARKLE_FEED_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/appcast.xml
+          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+          SPARKLE_UPDATE_OUTPUT: ${{ runner.temp }}/amneziawg-release-candidate
+        run: |
+          set -euo pipefail
+          candidate="$RUNNER_TEMP/amneziawg-release-candidate"
+          mkdir -p "$candidate"
+          scripts/package-unsigned-macos-daemon.sh "$candidate"
+          package=$(find "$candidate" -maxdepth 1 -type f -name 'AmneziaWG-unsigned-macos-*.zip' -print -quit)
+          update=$(find "$candidate" -maxdepth 1 -type f -name 'AmneziaWG-*.app.zip' -print -quit)
+          [[ -n "$package" && -n "$update" ]]
+          scripts/test-unsigned-macos-package.sh "$package"
+          scripts/test-sparkle-app-update.sh "$update"
+          /usr/bin/shasum -a 256 "$package" "$update" > "$candidate/SHA256SUMS.txt"
+
+      - name: Fetch Sparkle 2.10.0 publishing tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools_dir="$RUNNER_TEMP/sparkle-tools"
+          archive="$tools_dir/Sparkle-for-Swift-Package-Manager.zip"
+          mkdir -p "$tools_dir"
+          /usr/bin/curl --fail --location --silent --show-error \
+            --output "$archive" \
+            https://github.com/sparkle-project/Sparkle/releases/download/2.10.0/Sparkle-for-Swift-Package-Manager.zip
+          expected=17e28312b8e18ab7cdbbe09a6fb28cc55a5479ec6c371dbc07cdecd2a14fd959
+          actual=$(/usr/bin/shasum -a 256 "$archive" | /usr/bin/awk '{print $1}')
+          [[ "$actual" == "$expected" ]] || { echo "Sparkle tool checksum mismatch" >&2; exit 1; }
+          ditto -x -k "$archive" "$tools_dir/unpacked"
+          [[ -x "$tools_dir/unpacked/bin/generate_appcast" ]]
+
+      - name: Generate and validate signed appcast
+        shell: bash
+        env:
+          SPARKLE_ED25519_PRIVATE_KEY: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY }}
+          SPARKLE_FEED_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/appcast.xml
+        run: |
+          set -euo pipefail
+          candidate="$RUNNER_TEMP/amneziawg-release-candidate"
+          archives="$RUNNER_TEMP/amneziawg-appcast-input"
+          update=$(find "$candidate" -maxdepth 1 -type f -name 'AmneziaWG-*.app.zip' -print -quit)
+          build=$(sed -nE 's/^VERSION_ID_MACOS = ([0-9]+)$/\1/p' Sources/WireGuardApp/Config/Version.xcconfig)
+          [[ "$build" =~ ^[1-9][0-9]*$ ]]
+          mkdir -p "$archives"
+          cp "$update" "$archives/"
+
+          update_name=$(basename "$update")
+          notes="${update_name%.zip}.md"
+          printf '%s\n' "# $TAG" "" "Experimental unsigned daemon GUI." "The root daemon stays a separate manual package installation." > "$archives/$notes"
+          printf '%s\n' "$SPARKLE_ED25519_PRIVATE_KEY" | "$RUNNER_TEMP/sparkle-tools/unpacked/bin/generate_appcast" \
+            --ed-key-file - \
+            --download-url-prefix "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/" \
+            --link "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" \
+            --embed-release-notes \
+            -o "$archives/appcast.xml" \
+            "$archives"
+          [[ -s "$archives/appcast.xml" ]]
+          grep -Fq "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/${update##*/}" "$archives/appcast.xml"
+          grep -Fq '<sparkle:version>'"$build"'</sparkle:version>' "$archives/appcast.xml"
+          cp "$archives/appcast.xml" "$candidate/appcast.xml"
+
+      - name: Upload signed release candidate for review
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: unsigned-macos-release-candidate-${{ inputs.tag }}
+          path: ${{ runner.temp }}/amneziawg-release-candidate
+          if-no-files-found: error

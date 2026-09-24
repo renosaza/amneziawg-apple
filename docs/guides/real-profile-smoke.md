@@ -38,10 +38,10 @@ private endpoint into an issue, CI log, or repository.
    ```
 
 3. Import three locally controlled profiles: one IPv4 full profile and two
-   non-overlapping IPv4 split profiles. The full profile must include its own
-   literal peer endpoint `/32` in `ExcludeIPs`; corporate split endpoint
-   addresses must remain outside the full route as well. Keep DNS and IPv6
-   absent for this experimental path.
+   non-overlapping IPv4 split profiles. The full profile's `ExcludeIPs` must
+   include all three literal public peer endpoint `/32` values: its own and
+   both corporate split-profile endpoints. Keep DNS and IPv6 absent for this
+   experimental path.
 
 The current GUI rejects hostname endpoints, multiple peers, DNS, IPv6, and
 on-demand. It accepts one literal IPv4 peer per profile. Do not proceed after
