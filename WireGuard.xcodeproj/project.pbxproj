@@ -297,6 +297,14 @@
 		7A00014C2F00000100000001 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 4E9BD26E2BC12AAB00D71616 /* Localizable.xcstrings */; };
 		7A00014D2F00000100000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6FB1BD6121D2607E00A991BF /* Assets.xcassets */; };
 		7A00014E2F00000100000001 /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6FB1BDB621D4F8B800A991BF /* NetworkExtension.framework */; };
+		7A00014F2F00000100000001 /* PacketTunnelSettingsGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585B10502577E293004F691E /* PacketTunnelSettingsGenerator.swift */; };
+		7A0001502F00000100000001 /* PacketTunnelSettingsGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585B10502577E293004F691E /* PacketTunnelSettingsGenerator.swift */; };
+		7A0001512F00000100000001 /* Array+ConcurrentMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585B104C2577E293004F691E /* Array+ConcurrentMap.swift */; };
+		7A0001522F00000100000001 /* Array+ConcurrentMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585B104C2577E293004F691E /* Array+ConcurrentMap.swift */; };
+		7A0001532F00000100000001 /* DNSResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585B104D2577E293004F691E /* DNSResolver.swift */; };
+		7A0001542F00000100000001 /* DNSResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585B104D2577E293004F691E /* DNSResolver.swift */; };
+		7A0001552F00000100000001 /* IPAddress+AddrInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585B104E2577E293004F691E /* IPAddress+AddrInfo.swift */; };
+		7A0001562F00000100000001 /* IPAddress+AddrInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585B104E2577E293004F691E /* IPAddress+AddrInfo.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1473,6 +1481,10 @@
 				6FB17946222FD5960018AE71 /* OnDemandWiFiControls.swift in Sources */,
 				585B10882577E294004F691E /* IPAddressRange.swift in Sources */,
 				7A0000032F00000100000001 /* RouteOwnershipValidator.swift in Sources */,
+				7A00014F2F00000100000001 /* PacketTunnelSettingsGenerator.swift in Sources */,
+				7A0001512F00000100000001 /* Array+ConcurrentMap.swift in Sources */,
+				7A0001532F00000100000001 /* DNSResolver.swift in Sources */,
+				7A0001552F00000100000001 /* IPAddress+AddrInfo.swift in Sources */,
 				6FB1BDBC21D50F0200A991BF /* ringlogger.c in Sources */,
 				6FB1BDBD21D50F0200A991BF /* ringlogger.h in Sources */,
 				6FBA103F21D6B6FF0051C35F /* TunnelImporter.swift in Sources */,
@@ -1658,6 +1670,10 @@
 				7A0001272F00000100000001 /* OnDemandWiFiControls.swift in Sources */,
 				7A0001282F00000100000001 /* IPAddressRange.swift in Sources */,
 				7A0001292F00000100000001 /* RouteOwnershipValidator.swift in Sources */,
+				7A0001502F00000100000001 /* PacketTunnelSettingsGenerator.swift in Sources */,
+				7A0001522F00000100000001 /* Array+ConcurrentMap.swift in Sources */,
+				7A0001542F00000100000001 /* DNSResolver.swift in Sources */,
+				7A0001562F00000100000001 /* IPAddress+AddrInfo.swift in Sources */,
 				7A00012A2F00000100000001 /* ringlogger.c in Sources */,
 				7A00012B2F00000100000001 /* ringlogger.h in Sources */,
 				7A00012C2F00000100000001 /* TunnelImporter.swift in Sources */,
