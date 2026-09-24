@@ -19,7 +19,8 @@ grep -Fq 'recordRoutePlan' "$manager"
 grep -Fq 'recordValidation' "$manager"
 grep -Fq 'recordStage' "$manager"
 grep -Fq 'newOperationID' "$manager"
-grep -Fq 'DaemonDiagnostics.recordRoutePlan(builtPlan)' "$manager"
+grep -Fq 'DaemonDiagnostics.recordRoutePlan(builtPlan, operationID: diagnosticID)' "$manager"
+[[ $(grep -Fc '"id": diagnosticID' "$manager") -ge 7 ]]
 
 # Diagnostics must never accept or render the request data that carries key material.
 diagnostics=$(awk '/private enum DaemonDiagnostics \{/,/^final class DaemonTunnelsManager/' "$manager")

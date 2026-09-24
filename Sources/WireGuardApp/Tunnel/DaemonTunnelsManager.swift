@@ -31,11 +31,11 @@ private enum DaemonDiagnostics {
         _ = DaemonDiagnosticFileSink.append(message)
     }
 
-    static func recordRoutePlan(_ plan: MacOSDaemonRoutePlan) {
+    static func recordRoutePlan(_ plan: MacOSDaemonRoutePlan, operationID: String) {
         let owners = Dictionary(grouping: plan.routes, by: \.owner.rawValue).map {
             "\($0.key):\($0.value.count)"
         }.sorted().joined(separator: ",")
-        record("route_plan", fields: ["owners": owners])
+        record("route_plan", fields: ["id": operationID, "owners": owners])
     }
 
     static func recordValidation(_ operationID: String, _ error: MacOSDaemonSingleSplitProfileError?) {
@@ -297,7 +297,9 @@ final class DaemonTunnelsManager: TunnelsManager {
         let localProfiles = daemonProfiles()
         let diagnosticID = DaemonDiagnostics.newOperationID()
         tunnel.status = .activating
-        DaemonDiagnostics.record("status_transition", fields: ["from": "inactive", "to": "activating"])
+        DaemonDiagnostics.record("status_transition", fields: [
+            "id": diagnosticID, "from": "inactive", "to": "activating"
+        ])
         DaemonDiagnostics.recordStage(diagnosticID, stage: "activation", outcome: "started")
         mutationQueue.async { [weak self, weak tunnel] in
             guard let self, let tunnel else { return }
@@ -373,7 +375,7 @@ final class DaemonTunnelsManager: TunnelsManager {
             case .success(let builtPlan):
                 plan = builtPlan
                 DaemonDiagnostics.recordValidation(diagnosticID, nil)
-                DaemonDiagnostics.recordRoutePlan(builtPlan)
+                DaemonDiagnostics.recordRoutePlan(builtPlan, operationID: diagnosticID)
             case .failure(let error):
                 DaemonDiagnostics.recordValidation(diagnosticID, error)
                 DispatchQueue.main.async { [weak self, weak tunnel] in
@@ -399,7 +401,9 @@ final class DaemonTunnelsManager: TunnelsManager {
                         return
                     }
                     tunnel.status = .active
-                    DaemonDiagnostics.record("status_transition", fields: ["from": "activating", "to": "active"])
+                    DaemonDiagnostics.record("status_transition", fields: [
+                        "id": diagnosticID, "from": "activating", "to": "active"
+                    ])
                     DaemonDiagnostics.recordStage(diagnosticID, stage: "activation", outcome: "finished")
                     self.activationDelegate?.tunnelActivationSucceeded(tunnel: tunnel)
                 }
@@ -413,7 +417,8 @@ final class DaemonTunnelsManager: TunnelsManager {
                     guard let self, let tunnel, self.tunnels.contains(tunnel) else { return }
                     tunnel.status = reconciliation.status
                     DaemonDiagnostics.record("status_transition", fields: [
-                        "from": "activating", "to": reconciliation.status == .inactive ? "inactive" : "reasserting"
+                        "id": diagnosticID, "from": "activating",
+                        "to": reconciliation.status == .inactive ? "inactive" : "reasserting"
                     ])
                     DaemonDiagnostics.recordStage(diagnosticID, stage: "activation", outcome: "failed")
                     self.activationDelegate?.tunnelActivationAttemptFailed(
@@ -434,7 +439,9 @@ final class DaemonTunnelsManager: TunnelsManager {
         else { return }
         let diagnosticID = DaemonDiagnostics.newOperationID()
         tunnel.status = .deactivating
-        DaemonDiagnostics.record("status_transition", fields: ["from": "active", "to": "deactivating"])
+        DaemonDiagnostics.record("status_transition", fields: [
+            "id": diagnosticID, "from": "active", "to": "deactivating"
+        ])
         DaemonDiagnostics.recordStage(diagnosticID, stage: "deactivation", outcome: "started")
         mutationQueue.async { [weak self, weak tunnel] in
             guard let self else { return }
@@ -446,7 +453,9 @@ final class DaemonTunnelsManager: TunnelsManager {
                 DispatchQueue.main.async { [weak self, weak tunnel] in
                     guard let self, let tunnel, self.tunnels.contains(tunnel) else { return }
                     tunnel.status = .inactive
-                    DaemonDiagnostics.record("status_transition", fields: ["from": "deactivating", "to": "inactive"])
+                    DaemonDiagnostics.record("status_transition", fields: [
+                        "id": diagnosticID, "from": "deactivating", "to": "inactive"
+                    ])
                     DaemonDiagnostics.recordStage(diagnosticID, stage: "deactivation", outcome: "finished")
                 }
             } catch {
@@ -468,7 +477,8 @@ final class DaemonTunnelsManager: TunnelsManager {
                     guard let self, let tunnel, self.tunnels.contains(tunnel) else { return }
                     tunnel.status = refreshedStatus
                     DaemonDiagnostics.record("status_transition", fields: [
-                        "from": "deactivating", "to": refreshedStatus == .inactive ? "inactive" : "reasserting"
+                        "id": diagnosticID, "from": "deactivating",
+                        "to": refreshedStatus == .inactive ? "inactive" : "reasserting"
                     ])
                     DaemonDiagnostics.recordStage(diagnosticID, stage: "deactivation", outcome: "failed")
                     self.activationDelegate?.tunnelActivationAttemptFailed(
