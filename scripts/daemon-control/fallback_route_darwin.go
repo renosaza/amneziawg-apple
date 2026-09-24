@@ -18,7 +18,7 @@ var syntheticFallbackMask = [4]byte{255, 255, 255, 0}
 
 var syntheticSplitPrefixes = []netip.Prefix{
 	syntheticPrecedencePrefix,
-	netip.MustParsePrefix("192.0.2.200/32"),
+	netip.MustParsePrefix("198.51.100.11/32"),
 }
 
 // SyntheticFallbackRoute owns one fixed TEST-NET split prefix for the manual POC.
