@@ -14,6 +14,12 @@ type Backend interface {
 	Status(Session) error
 }
 
+// routePlanBackend is an opt-in experimental extension. Ordinary backends never
+// receive route plans and therefore remain route-free.
+type routePlanBackend interface {
+	StartWithRoutePlan(config string, plan routePlan) (Session, error)
+}
+
 type memoryBackend struct{}
 
 func (memoryBackend) Start(string) (Session, error) { return Session{}, nil }
