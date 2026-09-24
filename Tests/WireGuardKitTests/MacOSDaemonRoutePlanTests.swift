@@ -108,7 +108,11 @@ final class MacOSDaemonRoutePlanTests: XCTestCase {
     func testSingleIPv4SplitRejectsUnsuitableLocalAddress() {
         let result = MacOSDaemonRoutePlan.buildSingleIPv4Split(
             activating: "CM",
-            configuration: configuration(allowed: ["10.25.0.0/24"], address: ["127.0.0.1/24"])
+            configuration: configuration(
+                allowed: ["10.25.0.0/24"],
+                endpoint: Endpoint(from: "198.51.100.10:51820")!,
+                address: ["127.0.0.1/24"]
+            )
         )
 
         XCTAssertEqual(result, .failure(.routePlan(.invalidInterfaceAddress)))
