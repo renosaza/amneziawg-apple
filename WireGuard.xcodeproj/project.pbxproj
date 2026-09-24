@@ -2167,8 +2167,6 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DAEMON_MODE";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				SPARKLE_FEED_URL = "";
-				SPARKLE_PUBLIC_ED_KEY = "";
 			};
 			name = Debug;
 		};
@@ -2194,8 +2192,6 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DAEMON_MODE";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				SPARKLE_FEED_URL = "";
-				SPARKLE_PUBLIC_ED_KEY = "";
 			};
 			name = Release;
 		};

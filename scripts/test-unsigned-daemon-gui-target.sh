@@ -6,6 +6,7 @@ repo_dir=$(cd "$script_dir/.." && pwd)
 project="$repo_dir/WireGuard.xcodeproj/project.pbxproj"
 manager="$repo_dir/Sources/WireGuardApp/Tunnel/DaemonTunnelsManager.swift"
 updater="$repo_dir/Sources/WireGuardApp/UI/macOS/DaemonUpdater.swift"
+developer_config="$repo_dir/Sources/WireGuardApp/Config/Developer.xcconfig.template"
 
 plutil -lint "$project"
 
@@ -61,7 +62,12 @@ for configuration in ('7A0000162F00000100000001', '7A0000172F00000100000001'):
     assert 'INFOPLIST_KEY_SUEnableAutomaticChecks = YES' in block
     assert 'INFOPLIST_KEY_SURequireSignedFeed = YES' in block
     assert 'INFOPLIST_KEY_SUVerifyUpdateBeforeExtraction = YES' in block
+    assert 'SPARKLE_FEED_URL = ""' not in block
+    assert 'SPARKLE_PUBLIC_ED_KEY = ""' not in block
 PY
+
+grep -Fxq 'SPARKLE_FEED_URL =' "$developer_config"
+grep -Fxq 'SPARKLE_PUBLIC_ED_KEY =' "$developer_config"
 
 grep -Fq 'url.scheme?.lowercased() == "https"' "$updater"
 grep -Fq 'Data(base64Encoded: publicKey)?.count == 32' "$updater"

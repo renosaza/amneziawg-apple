@@ -109,7 +109,8 @@ jobs:
           mkdir -p "$archives"
           cp "$update" "$archives/"
 
-          notes="${update%.zip}.md"
+          update_name=$(basename "$update")
+          notes="${update_name%.zip}.md"
           printf '%s\n' "# $TAG" "" "Experimental unsigned daemon GUI." "The root daemon stays a separate manual package installation." > "$archives/$notes"
           printf '%s\n' "$SPARKLE_ED25519_PRIVATE_KEY" | "$RUNNER_TEMP/sparkle-tools/unpacked/bin/generate_appcast" \
             --ed-key-file - \
