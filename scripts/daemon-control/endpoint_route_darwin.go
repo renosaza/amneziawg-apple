@@ -79,11 +79,11 @@ func selectBaseRoute(messages []route.Message, target, gateway netip.Addr, iface
 		if !ok || !prefix.Contains(target) {
 			continue
 		}
-		actualGateway, actualIface, err := physicalGateway(message)
-		if err != nil || actualGateway != gateway || actualIface.Index != iface.Index || actualIface.Name != iface.Name {
+		actualGateway, index, name, err := physicalRouteMetadata(message)
+		if err != nil || actualGateway != gateway || index != iface.Index || name != iface.Name {
 			continue
 		}
-		if selected.IsValid() && selected.Bits() == prefix.Bits() && selected != prefix {
+		if selected.IsValid() && selected.Bits() == prefix.Bits() {
 			return netip.Prefix{}, errors.New("ambiguous base route")
 		}
 		if !selected.IsValid() || prefix.Bits() > selected.Bits() {
