@@ -35,8 +35,8 @@ func TestManualRoutePlanStartAndCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const config = "private_key=1111111111111111111111111111111111111111111111111111111111111111\npublic_key=2222222222222222222222222222222222222222222222222222222222222222\nallowed_ip=198.51.100.0/24\nendpoint=198.51.100.20:1"
-	const plan = `{"local_address":"192.0.2.3/32","routes":[{"destination":"198.51.100.0/24","owner":"tunnel"},{"destination":"198.51.100.20/32","owner":"physicalEndpoint"}]}`
+	const config = "private_key=1111111111111111111111111111111111111111111111111111111111111111\npublic_key=2222222222222222222222222222222222222222222222222222222222222222\nallowed_ip=198.51.100.128/25\nendpoint=203.0.113.20:1"
+	const plan = `{"local_address":"192.0.2.9/32","routes":[{"destination":"198.51.100.128/25","owner":"tunnel"},{"destination":"203.0.113.20/32","owner":"physicalEndpoint"}]}`
 	frame, err := json.Marshal(request{Version: 1, Operation: "start", ProfileID: profileID, Config: config, RoutePlan: json.RawMessage(plan)})
 	if err != nil {
 		t.Fatal(err)

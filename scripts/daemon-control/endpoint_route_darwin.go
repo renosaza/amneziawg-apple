@@ -241,13 +241,17 @@ func (configured *PhysicalEndpointRoute) baseRouteInRIB() bool {
 		if !ok {
 			continue
 		}
-		prefix, ok := routePrefix(message)
-		gateway, gatewayOK := routeAddress(message, syscall.RTAX_GATEWAY).(*route.Inet4Addr)
-		if ok && gatewayOK && prefix == configured.basePrefix && message.Index == configured.iface.Index && gateway.IP == configured.gateway.As4() {
+		if configured.matchesBaseRoute(message) {
 			return true
 		}
 	}
 	return false
+}
+
+func (configured *PhysicalEndpointRoute) matchesBaseRoute(message *route.RouteMessage) bool {
+	prefix, ok := routePrefix(message)
+	gateway, gatewayOK := routeAddress(message, syscall.RTAX_GATEWAY).(*route.Inet4Addr)
+	return ok && gatewayOK && prefix == configured.basePrefix && message.Index == configured.iface.Index && gateway.IP == configured.gateway.As4()
 }
 
 func (configured *PhysicalEndpointRoute) routeAddrs() []route.Addr {

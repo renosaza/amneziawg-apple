@@ -103,6 +103,19 @@ func TestSyntheticPhysicalEndpointReadsGatewayAndInterface(t *testing.T) {
 	}
 }
 
+func TestPlannedEndpointBaseRouteIdentity(t *testing.T) {
+	configured := &PhysicalEndpointRoute{basePrefix: netip.MustParsePrefix("192.0.2.0/24"), gateway: netip.MustParseAddr("192.0.2.1"), iface: &net.Interface{Index: 7, Name: "en0"}}
+	message := physicalRouteMessage(7, syscall.RTF_UP|syscall.RTF_GATEWAY, [4]byte{192, 0, 2, 0}, [4]byte{192, 0, 2, 1}, "en0")
+	message.Addrs[syscall.RTAX_NETMASK] = &route.Inet4Addr{IP: [4]byte{255, 255, 255, 0}}
+	if !configured.matchesBaseRoute(message) {
+		t.Fatal("did not match base route")
+	}
+	message.Index = 8
+	if configured.matchesBaseRoute(message) {
+		t.Fatal("accepted changed base route")
+	}
+}
+
 func TestSyntheticPhysicalEndpointRejectsChangedGateway(t *testing.T) {
 	configured := &PhysicalEndpointRoute{
 		gateway: netip.MustParseAddr("192.168.1.1"),
